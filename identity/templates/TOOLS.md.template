@@ -1,0 +1,13 @@
+# TOOLS.md
+
+## Infrastructure
+- Gateway port: {{GATEWAY_PORT}}
+- Region: {{REGION}}
+- Timezone: Asia/Taipei
+
+## 整合服務
+{{INTEGRATIONS_LIST}}
+
+## 注意事項
+- 不要在此檔案存放密碼或 token
+- 環境變數透過 secrets/ 管理
