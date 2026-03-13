@@ -1,0 +1,20 @@
+{
+  "name": "bar",
+  "display_name": "酒吧",
+  "skills": [
+    "identity-update",
+    "weather-cwa",
+    "knowledge-base",
+    "image-generation",
+    "daily-review"
+  ],
+  "channels": ["discord", "line"],
+  "integrations": {
+    "cwa": true,
+    "google_tasks": "optional"
+  },
+  "suggested_additions": [
+    "calendar-manager",
+    "follow-up-tracker"
+  ]
+}
