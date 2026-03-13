@@ -126,12 +126,27 @@
 - 啟動方式：`openclaw gateway --workspace <workspace-path> --port <port>`
 - 適合開發與 debug
 
+### 認證方式（兩種 mode 皆適用）
+
+Bull 啟動後需要登入 AI 模型。推薦使用 OAuth（不需要 API key）：
+
+```bash
+# Docker mode
+docker exec -it bull-<instance-id> openclaw models auth login --provider openai-codex
+
+# Native mode
+openclaw models auth login --provider openai-codex
+```
+
+CLI 會印出一個 URL，在任意瀏覽器打開並登入，把 redirect URL 貼回終端機即完成。
+詳見 `docs/accounts-checklist.md`。
+
 ### AI Agent 行為規則
 
 - **預設使用 Docker mode**，除非使用者明確指定 `--native`
 - Docker mode 下，確認 `docker` command 可用再繼續
 - Native mode 下，確認 `openclaw` command 可用再繼續
-- 兩種 mode 的 workspace 結構完全相同，差別只在啟動方式
+- 兩種 mode 的 workspace 結構完全相同，差別只在啟動方式和認證指令的前綴（`docker exec` vs 直接執行）
 
 ---
 
@@ -192,18 +207,7 @@ raise.sh 會自動執行 12 個步驟：
 11. 設定 Docker（或跳過 if native）
 12. 執行 sanitize.sh + doctor.sh
 
-### Step 5 — 填寫 secrets
-
-```bash
-cp ~/bulls/<instance-id>/workspace/secrets/.env.example \
-   ~/bulls/<instance-id>/workspace/secrets/provider.env
-
-# 編輯 provider.env，填入 API keys
-```
-
-需要哪些 key 取決於 preset，詳見 `docs/accounts-checklist.md`。
-
-### Step 6 — 啟動服務
+### Step 5 — 啟動服務
 
 ```bash
 # Docker mode
@@ -213,7 +217,62 @@ cd ~/bulls/<instance-id> && docker compose up -d
 openclaw gateway --workspace ~/bulls/<instance-id>/workspace --port 18890
 ```
 
-### Step 7 — 驗證部署
+### Step 6 — 登入 AI 模型（OAuth）
+
+服務啟動後，執行 OAuth 登入。推薦 ChatGPT OAuth：
+
+```bash
+# Docker mode
+docker exec -it bull-<instance-id> openclaw models auth login --provider openai-codex
+
+# Native mode
+openclaw models auth login --provider openai-codex
+```
+
+**流程：**
+1. 執行指令 → 終端機印出 URL
+2. 在任意瀏覽器（手機、電腦皆可）打開 URL
+3. 登入 ChatGPT（需 ChatGPT Plus 帳號）
+4. 把 redirect URL 貼回終端機
+
+**替代方案：** Google Gemini OAuth（門檻最低，只需 Google 帳號）：
+
+```bash
+# Docker mode
+docker exec -it bull-<instance-id> openclaw models auth login --provider google-gemini-cli
+
+# Native mode
+openclaw models auth login --provider google-gemini-cli
+```
+
+### Step 7 — 填寫其他 secrets（選填）
+
+如果 preset 需要額外服務（天氣 API、圖片生成等），填寫 `provider.env`：
+
+```bash
+cp ~/bulls/<instance-id>/workspace/secrets/.env.example \
+   ~/bulls/<instance-id>/workspace/secrets/provider.env
+
+# 編輯 provider.env，填入選填的 API keys（CWA、HCTI 等）
+```
+
+詳見 `docs/accounts-checklist.md`。
+
+### Step 8 — Google Workspace 授權（依 preset）
+
+association / office preset 必須授權 Google Workspace（Calendar, Tasks, Gmail）：
+
+```bash
+# Docker mode
+docker exec -it bull-<instance-id> gog auth login
+
+# Native mode
+gog auth login
+```
+
+同樣會印出 URL，在瀏覽器完成 Google 帳號授權。
+
+### Step 9 — 驗證部署
 
 ```bash
 ./scripts/doctor.sh ~/bulls/<instance-id>
@@ -281,7 +340,7 @@ Step 4: 全部 OK → 完成
 | #4 params_json_validation | 缺少 brand.name | 編輯 `params.json` 補上必填欄位 |
 | #5 managed_state_json | skills 與 state 不同步 | 執行 `feed.sh` 重新同步 |
 | #6 managed_skills | skill 缺少 SKILL.md | 執行 `feed.sh` 補回 |
-| #7 secrets_readiness | API key 未設定 | 填寫 `secrets/provider.env` |
+| #7 secrets_readiness | AI 模型未認證 | 執行 `openclaw models auth login`（OAuth）或填寫 `secrets/provider.env` |
 | #8 runtime_availability | Docker 未安裝或容器停了 | 安裝 Docker 或 `docker compose up -d` |
 | #9 port_availability | Port 被佔用 | 換 port 或停掉佔用程式 |
 | #10 ops_readiness | 未執行過備份 | `./scripts/backup.sh ~/bulls/<instance-id>` |
