@@ -1,0 +1,9 @@
+sk-[a-zA-Z0-9]{20,}
+[a-f0-9]{32,}
+password\s*[:=]\s*["'][^"']+["']
+secret\s*[:=]\s*["'][^"']+["']
+token\s*[:=]\s*["'][^"']+["']
+api.key\s*[:=]\s*["'][^"']+["']
+employee_id.*[0-9a-f]{8}-
+Authorization:\s*Bearer\s+[a-zA-Z0-9._-]+
+https?://[^@\s]+:[^@\s]+@
