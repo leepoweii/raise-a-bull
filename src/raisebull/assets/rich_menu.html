@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Inter:wght@400;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 2500px;
+    height: 843px;
+    background: #06C755;
+    display: flex;
+    flex-direction: column;
+    font-family: 'Inter', 'Noto Sans TC', sans-serif;
+    overflow: hidden;
+  }
+
+  /* Top LINE green bar */
+  .masthead {
+    height: 12px;
+    background: rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+
+  /* Main button row */
+  .buttons {
+    flex: 1;
+    display: flex;
+  }
+
+  .btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border-right: 1px solid rgba(255,255,255,0.25);
+    position: relative;
+    padding: 60px 0;
+  }
+  .btn:last-child { border-right: none; }
+
+  /* Icon box */
+  .icon-box {
+    width: 180px;
+    height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 52px;
+    border-radius: 36px;
+    background: rgba(255,255,255,0.2);
+  }
+
+  .icon-box svg {
+    width: 96px;
+    height: 96px;
+    stroke-width: 1.5;
+    stroke: #ffffff;
+  }
+
+  /* Labels */
+  .label-en {
+    font-family: 'Inter', sans-serif;
+    font-size: 68px;
+    font-weight: 700;
+    letter-spacing: -1px;
+    margin-bottom: 14px;
+    color: #ffffff;
+  }
+
+  .label-zh {
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: 38px;
+    font-weight: 400;
+    letter-spacing: 4px;
+    color: rgba(255,255,255,0.7);
+  }
+
+  /* Bottom rule */
+  .footer {
+    height: 6px;
+    background: rgba(0,0,0,0.15);
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+  <div class="masthead"></div>
+
+  <div class="buttons">
+
+    <div class="btn">
+      <div class="icon-box">
+        <i data-lucide="message-square-plus"></i>
+      </div>
+      <div class="label-en">New Session</div>
+      <div class="label-zh">開新對話</div>
+    </div>
+
+    <div class="btn">
+      <div class="icon-box">
+        <i data-lucide="activity"></i>
+      </div>
+      <div class="label-en">Session Info</div>
+      <div class="label-zh">查看狀態</div>
+    </div>
+
+    <div class="btn">
+      <div class="icon-box">
+        <i data-lucide="fold-vertical"></i>
+      </div>
+      <div class="label-en">Compact</div>
+      <div class="label-zh">整理對話</div>
+    </div>
+
+  </div>
+
+  <div class="footer"></div>
+
+  <script>lucide.createIcons();</script>
+</body>
+</html>
