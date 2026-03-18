@@ -183,7 +183,7 @@ class ClaudeRunner:
         stderr_output = await stderr_task
 
         result = self._parse_lines(raw_lines)
-        if proc.returncode != 0:
+        if proc.returncode != 0 and not result.error:
             result.error = stderr_output.decode(errors="replace").strip() or f"exit {proc.returncode}"
             result.text = ""
             result.stale_session = ClaudeRunner._is_stale_session_error(result.error)
