@@ -199,3 +199,46 @@ If you couldn't find your User ID in the LINE Developers Console:
    - Or look for a line containing `line:Uxxxxxxx` in the logs
 4. Copy the `Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` value and paste it into `.env` as `LINE_USER_ID`
 5. Restart: `docker compose restart`
+
+---
+
+## Phase 9 — LINE Rich Menu (optional but recommended)
+
+The rich menu adds a persistent green button bar at the bottom of the LINE chat with **New Session**, **Session Info**, and **Compact** buttons.
+
+Set it up with one command:
+
+```bash
+docker compose run --rm daniu python -m raisebull.setup_rich_menu
+```
+
+This will:
+1. Create the rich menu on LINE's servers
+2. Upload the pre-built image (`src/raisebull/assets/rich_menu.png`)
+3. Set it as the default menu for all users
+4. Clean up any previously created menus
+
+After running, send any message to the bot on LINE — the green menu bar will appear at the bottom.
+
+> **Note:** LINE theme color cannot be changed via API — it is set in LINE Official Account Manager (manager.line.biz) → Design. The rich menu uses LINE's brand green (`#06C755`) for consistency.
+
+### Customizing the Rich Menu Image
+
+To change the design:
+1. Edit `src/raisebull/assets/rich_menu.html`
+2. Re-render it using the screenshot service or any headless browser:
+   ```bash
+   # If you have the agents-infra screenshot service running:
+   python3 -c "
+   import json, urllib.request
+   html = open('src/raisebull/assets/rich_menu.html').read()
+   payload = json.dumps({'html': html, 'width': 2500, 'height': 843, 'format': 'png'}).encode()
+   req = urllib.request.Request('http://localhost:18892/screenshot', data=payload,
+       headers={'Content-Type': 'application/json', 'x-api-key': 'YOUR_API_KEY'})
+   with urllib.request.urlopen(req) as resp:
+       open('src/raisebull/assets/rich_menu.png', 'wb').write(resp.read())
+   "
+   ```
+3. Re-run `docker compose run --rm daniu python -m raisebull.setup_rich_menu`
+
+LINE Rich Menu image requirements: **2500×843px**, PNG or JPEG, max 1MB.
