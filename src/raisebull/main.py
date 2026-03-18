@@ -144,18 +144,19 @@ async def webhook_line(request: Request) -> Response:
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
 
-    configuration = Configuration(access_token=access_token)
-    with ApiClient(configuration) as api_client:
-        messaging_api = MessagingApi(api_client)
+    async def _process() -> None:
+        configuration = Configuration(access_token=access_token)
+        with ApiClient(configuration) as api_client:
+            messaging_api = MessagingApi(api_client)
+            for event in events:
+                if isinstance(event, MessageEvent) and isinstance(
+                    event.message, TextMessageContent
+                ):
+                    await handle_line_message(
+                        event, _runner, _sessions, messaging_api
+                    )
 
-        for event in events:
-            if isinstance(event, MessageEvent) and isinstance(
-                event.message, TextMessageContent
-            ):
-                await handle_line_message(
-                    event, _runner, _sessions, messaging_api
-                )
-
+    asyncio.create_task(_process())
     return Response(content="OK", status_code=200)
 
 
