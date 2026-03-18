@@ -1,8 +1,32 @@
 # raise-a-bull
 
-> **raise-a-bull** — 金門地方組織的 AI 辦公室助理飼料包
->
-> *Feed pack for deploying OpenClaw AI office assistants to Kinmen local organizations*
+> **raise-a-bull** — Open-source personal AI operating system, built around Claude Code.
+
+*Previously an OpenClaw feed pack. Pivoted 2026-03-18 to a Claude Code–native framework.*
+
+---
+
+## What is raise-a-bull?
+
+raise-a-bull is a framework for running a personal AI assistant bot that:
+
+- Responds to **LINE** and **Discord** messages
+- Uses **Claude Code** (`claude -p`) as the only supported runtime (intentional)
+- Persists sessions and memory across restarts
+- Supports a **skills system** for extensible behavior
+- Integrates with **Paperclip** for multi-agent orchestration
+- Deploys on your **local machine** or **Zeabur** (one-click)
+
+**Samantha** is the reference/dogfood deployment — if it works for Samantha, it's in the framework.
+
+---
+
+## Philosophy
+
+- Claude Code is the runtime. We build the infrastructure around it.
+- `workspace/` is yours — private, never committed to this repo.
+- `src/raisebull/` is the framework — public, pip-installable, updatable.
+- Non-technical users are first-class citizens.
 
 ---
 
@@ -13,84 +37,65 @@
 git clone https://github.com/leepoweii/raise-a-bull.git
 cd raise-a-bull
 
-# 2. Raise — 用 preset 生成一頭牛
-./scripts/raise.sh --preset association --name "阿牛"
+# 2. Copy workspace template
+cp -r workspace.example workspace
+# Edit workspace/CLAUDE.md with your bot's personality
 
-# 3. Fill secrets & start
-cp secrets/.env.example secrets/.env
-# 填入 API keys，然後開始使用
+# 3. Configure
+cp .env.example .env
+# Fill in: ANTHROPIC_API_KEY, LINE_*, DISCORD_*
+
+# 4. Run
+docker compose up -d
 ```
 
 ---
 
-## Repo Structure
+## Repository Structure
 
 ```
 raise-a-bull/
-├── VERSION                  # 語意版號
-├── schemas/                 # 規格定義（bull / params / managed-state）
-├── identity/                # 身份設定
-│   ├── regions/kinmen/      # 金門在地化資料
-│   └── templates/           # 身份模板
-├── skills/                  # 技能模組（每個技能一個資料夾）
-│   ├── daily-review/
-│   ├── calendar-manager/
-│   ├── inbox-triage/
-│   ├── follow-up-tracker/
-│   ├── meeting-notes/
-│   ├── document-draft/
-│   ├── knowledge-base/
-│   ├── image-generation/
-│   ├── weather-cwa/
-│   └── identity-update/
-├── presets/                 # 預設組合包（bar, association, shop, office）
-├── scripts/                 # CLI 工具
-├── templates/               # 通用模板
-└── docs/                    # 文件
+├── src/raisebull/        # Framework (pip package)
+│   ├── runner.py         # BaseRunner + ClaudeRunner
+│   ├── sessions.py       # Session persistence (SQLite)
+│   ├── webhook_line.py   # LINE webhook handler
+│   ├── webhook_discord.py# Discord bot handler
+│   └── heartbeat.py      # Proactive push (APScheduler)
+├── workspace/            # Template — copy this, keep private
+│   ├── CLAUDE.md         # Bot personality & instructions
+│   ├── skills/           # Skill files loaded by claude -p
+│   └── memory/           # Persistent memory files
+├── docs/                 # Architecture & guides
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml
+└── .env.example
 ```
 
 ---
 
-## Skills
+## Deployment Options
 
-| Skill | 說明 | 狀態 |
-|---|---|---|
-| `daily-review` | 每日復盤與排程 | stub |
-| `calendar-manager` | Google Calendar 管理 | stub |
-| `inbox-triage` | 訊息分類與回覆建議 | stub |
-| `follow-up-tracker` | 追蹤待辦與提醒 | stub |
-| `meeting-notes` | 會議記錄整理 | stub |
-| `document-draft` | 公文 / 企劃書草稿 | stub |
-| `knowledge-base` | 在地知識庫查詢 | stub |
-| `image-generation` | 社群圖片生成 | stub |
-| `weather-cwa` | 中央氣象署天氣查詢 | stub |
-| `identity-update` | 身份設定熱更新 | stub |
+| Option | Best for | Notes |
+|--------|----------|-------|
+| Local machine | Power users | Needs Cloudflare tunnel for webhooks |
+| Zeabur | Non-tech users | One-click, handles webhooks automatically |
 
 ---
 
-## Presets
+## Requirements
 
-| Preset | 說明 | 適用場景 |
-|---|---|---|
-| `bar` | 酒吧助理 | 小型餐飲、酒吧 |
-| `association` | 協會助理 | 社區發展協會、地方團體 |
-| `shop` | 店家助理 | 零售、伴手禮店 |
-| `office` | 辦公室助理 | 工作站、一般辦公室 |
+- **Claude Code** (`npm install -g @anthropic-ai/claude-code`) — required, intentional
+- Docker
+- LINE Messaging API account (for LINE bot)
+- Discord bot token (for Discord bot)
 
 ---
 
-## Scripts
+## Samantha as Reference Deployment
 
-| Script | 用途 |
-|---|---|
-| `raise.sh` | 從 preset 生成新的 bull instance |
-| `feed.sh` | 更新技能或身份設定 |
-| `doctor.sh` | 健康檢查（設定驗證） |
-| `sanitize.sh` | 清除敏感資料 |
-| `backup.sh` | 備份 bull 設定與狀態 |
+Samantha is the dogfood deployment of raise-a-bull. All framework features are battle-tested through Samantha before release. When Samantha upgrades, raise-a-bull upgrades.
 
 ---
 
-## License
-
-MIT
+*raise-a-bull v0.1.0 — Claude Code era begins*
