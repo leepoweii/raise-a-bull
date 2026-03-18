@@ -1,0 +1,12 @@
+# Secrets — never commit
+secrets/
+*.env
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime
+*.log
+.backups/
