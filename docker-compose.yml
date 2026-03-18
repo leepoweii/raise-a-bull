@@ -1,13 +1,26 @@
 services:
-  callie:
+  daniu:
     build: .
+    container_name: bull-daniu
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "18888:8000"
     env_file: .env
     volumes:
       - ./workspace:/app/workspace:ro
-      - callie-data:/app/data
+      - daniu-data:/app/data
+    networks:
+      - default
+      - agents-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
-  callie-data:
+  daniu-data:
+
+networks:
+  agents-net:
+    external: true
