@@ -50,6 +50,22 @@ def _split_message(text: str, chunk_size: int = CHUNK_SIZE) -> list[str]:
     return chunks
 
 
+
+async def _run_with_recovery(runner, sessions, key: str, prompt: str, session_id: Optional[str]):
+    """Run prompt, auto-recovering from a stale session_id.
+
+    Returns (RunResult, effective_session_id).
+    On stale session, clears DB entry and retries without --resume.
+    """
+    result = await runner.run(prompt, session_id=session_id)
+    if result.stale_session:
+        logger.info("Stale session detected for %s — clearing and retrying", key)
+        await sessions.clear(key)
+        result = await runner.run(prompt, session_id=None)
+        session_id = None
+    return result, result.session_id or session_id or ""
+
+
 def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
     """Create and configure the Discord bot."""
     intents = discord.Intents.default()
@@ -83,7 +99,9 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
 
         try:
             async with message.channel.typing():
-                result = await runner.run(prompt, session_id=session_id)
+                result, effective_session_id = await _run_with_recovery(
+                    runner, sessions, key, prompt, session_id
+                )
         except Exception:
             logger.exception("runner.run() failed in on_message for channel %s", key)
             await message.reply("⚠️ 出了點問題，請再試一次。")
@@ -97,7 +115,7 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
         existing_tokens = session["token_count"] if session else 0
         await sessions.save(
             key,
-            session_id=result.session_id or session_id or "",
+            session_id=effective_session_id,
             domain=domain,
             token_count=existing_tokens + (result.input_tokens or 0) + (result.output_tokens or 0),
         )

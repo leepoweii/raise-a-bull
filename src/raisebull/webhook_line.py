@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from raisebull.discord_bot import _run_with_recovery  # noqa: E402
+
 
 async def handle_line_message(
     event: "MessageEvent",
@@ -57,11 +59,10 @@ async def handle_line_message(
     except Exception:
         logger.warning("show_loading_animation failed (non-fatal)", exc_info=True)
 
-    # 3. Run Claude
+    # 3. Run Claude (with automatic stale-session recovery)
     try:
-        result = await runner.run(
-            event.message.text,
-            session_id=existing_session_id,
+        result, effective_session_id = await _run_with_recovery(
+            runner, sessions, session_key, event.message.text, existing_session_id
         )
     except Exception:
         logger.exception("runner.run() raised an exception for user %s", user_id)
@@ -77,7 +78,7 @@ async def handle_line_message(
     new_tokens = (result.input_tokens or 0) + (result.output_tokens or 0)
     await sessions.save(
         session_key,
-        session_id=result.session_id or existing_session_id or "",
+        session_id=effective_session_id,
         domain="line",
         token_count=existing_tokens + new_tokens,
     )

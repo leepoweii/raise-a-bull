@@ -24,6 +24,7 @@ class RunResult:
     input_tokens: int = 0
     output_tokens: int = 0
     error: Optional[str] = None
+    stale_session: bool = False
 
 
 class ClaudeRunner:
@@ -65,6 +66,13 @@ class ClaudeRunner:
             for block in event.get("message", {}).get("content", [])
             if block.get("type") == "text"
         ]
+
+    @staticmethod
+    def _is_stale_session_error(stderr: 'str | None') -> bool:
+        """Return True if stderr indicates the session_id is no longer valid."""
+        if not stderr:
+            return False
+        return "No conversation found" in stderr
 
     def _parse_lines(self, lines: list[bytes]) -> RunResult:
         result = RunResult()
@@ -172,4 +180,5 @@ class ClaudeRunner:
         if proc.returncode != 0:
             result.error = stderr_output.decode(errors="replace").strip() or f"exit {proc.returncode}"
             result.text = ""
+            result.stale_session = ClaudeRunner._is_stale_session_error(result.error)
         return result
