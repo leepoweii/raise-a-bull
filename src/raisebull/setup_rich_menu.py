@@ -75,6 +75,7 @@ def set_default(token: str, rich_menu_id: str) -> None:
     resp = httpx.post(
         f"{LINE_API}/user/all/richmenu/{rich_menu_id}",
         headers=_headers(token),
+        content=b"{}",
     )
     resp.raise_for_status()
     print("✓ Set as default rich menu for all users")
