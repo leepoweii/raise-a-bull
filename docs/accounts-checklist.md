@@ -4,9 +4,33 @@
 
 ---
 
-## Required（必填）
+## Required（必填）— AI 模型認證
 
-### OpenAI API
+> **重要：** 使用 OAuth 登入是推薦方式，不需要手動填 API key。
+
+### 方式 A：ChatGPT OAuth（推薦）
+
+| 項目 | 內容 |
+|---|---|
+| **服務** | OpenAI ChatGPT（透過 OpenClaw OAuth） |
+| **前置條件** | ChatGPT Plus 帳號（$20/月） |
+| **設定方式** | 容器啟動後執行 `openclaw models auth login --provider openai-codex` |
+| **流程** | 1. 執行指令 → 2. 終端機印出 URL → 3. 在任意瀏覽器打開 URL → 4. 登入 ChatGPT → 5. 把 redirect URL 貼回終端機 |
+| **存放位置** | OpenClaw 自動管理（不需手動填 .env） |
+| **備註** | 成熟穩定，OpenClaw 官方支援最完整 |
+
+### 方式 B：Google Gemini OAuth（替代方案）
+
+| 項目 | 內容 |
+|---|---|
+| **服務** | Google Gemini CLI |
+| **前置條件** | Google 帳號 |
+| **設定方式** | 容器啟動後執行 `openclaw models auth login --provider google-gemini-cli` |
+| **流程** | 同上：執行指令 → 印 URL → 瀏覽器登入 → 貼回 redirect URL |
+| **存放位置** | OpenClaw 自動管理 |
+| **備註** | 門檻最低（只需 Google 帳號），但額度與穩定性政策可能變動 |
+
+### 方式 C：OpenAI API Key（進階）
 
 | 項目 | 內容 |
 |---|---|
@@ -15,17 +39,19 @@
 | **取得** | API Key（以 `sk-` 開頭） |
 | **環境變數** | `OPENAI_API_KEY` |
 | **存放位置** | `workspace/secrets/provider.env` |
+| **備註** | 適合有技術背景或需要 pay-per-use 控制成本的使用者 |
 
-### Google Workspace（Calendar / Tasks / Gmail）
+---
+
+## Required — Google Workspace（Calendar / Tasks / Gmail）
 
 | 項目 | 內容 |
 |---|---|
 | **服務** | Google Workspace（Calendar, Tasks, Gmail） |
-| **網址** | Google Cloud Console → OAuth 或 Service Account |
-| **取得** | OAuth credentials 或 service account JSON |
-| **環境變數** | `GOOGLE_CREDENTIALS`（或放 JSON 檔案） |
-| **存放位置** | `workspace/secrets/google_credentials.json` |
-| **備註** | 需要 gog CLI 授權；association / office preset 必須 |
+| **前置條件** | Google 帳號 |
+| **設定方式** | 容器內執行 `gog auth login`，同樣會印出 URL 在瀏覽器完成授權 |
+| **存放位置** | gog CLI 自動管理 |
+| **備註** | association / office preset 必須；bar / shop preset 選填 |
 
 ---
 
