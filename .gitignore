@@ -1,0 +1,13 @@
+.env
+*.env.local
+__pycache__/
+*.pyc
+.venv/
+dist/
+*.egg-info/
+.uv/
+workspace/
+!workspace.example/
+*.db
+*.sqlite
+.DS_Store
