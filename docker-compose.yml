@@ -7,7 +7,7 @@ services:
       - "18888:8000"
     env_file: .env
     volumes:
-      - ./workspace:/app/workspace:ro
+      - ./workspace:/app/workspace
       - daniu-data:/app/data
       - /home/samantha-machine/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     networks:
