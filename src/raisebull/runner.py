@@ -97,6 +97,12 @@ class ClaudeRunner:
                 usage = event.get("usage", {})
                 result.input_tokens = usage.get("input_tokens", 0)
                 result.output_tokens = usage.get("output_tokens", 0)
+                if event.get("is_error"):
+                    errors = event.get("errors", [])
+                    err_msg = errors[0] if errors else "error_during_execution"
+                    result.error = err_msg
+                    result.text = ""
+                    result.stale_session = ClaudeRunner._is_stale_session_error(err_msg)
 
         result.text = "".join(text_parts)
         return result
