@@ -30,6 +30,59 @@ logger = logging.getLogger(__name__)
 from raisebull.discord_bot import _run_with_recovery  # noqa: E402
 
 
+
+_LINE_COMMANDS = {"/new", "/info", "/compact"}
+
+
+async def _handle_line_command(
+    text: str,
+    user_id: str,
+    reply_token: str,
+    sessions: "SessionStore",
+    runner: "ClaudeRunner",
+    messaging_api: "MessagingApi",
+) -> bool:
+    """Handle /new, /info, /compact from the Rich Menu. Returns True if handled."""
+    session_key = f"line:{user_id}"
+    cmd = text.strip().lower()
+
+    if cmd == "/new":
+        await sessions.clear(session_key)
+        _send(user_id, reply_token, "✅ 已開新對話。", messaging_api)
+        return True
+
+    if cmd == "/info":
+        row = await sessions.get(session_key)
+        if row is None:
+            _send(user_id, reply_token, "目前沒有進行中的對話。", messaging_api)
+        else:
+            sid = row["session_id"][:6] if row["session_id"] else "—"
+            tokens = row["token_count"]
+            last = row["last_active"]
+            msg = f"📊 對話狀態\nID: {sid}...\nTokens: {tokens}\n最後活動: {last}"
+            _send(user_id, reply_token, msg, messaging_api)
+        return True
+
+    if cmd == "/compact":
+        row = await sessions.get(session_key)
+        existing_session_id = row["session_id"] if row else None
+        existing_tokens = row["token_count"] if row else 0
+        result = await runner.run("/compact", session_id=existing_session_id)
+        if result.error:
+            _send(user_id, reply_token, f"⚠️ {result.error}", messaging_api)
+        else:
+            new_tokens = (result.input_tokens or 0) + (result.output_tokens or 0)
+            await sessions.save(
+                session_key,
+                session_id=result.session_id or existing_session_id or "",
+                domain="line",
+                token_count=existing_tokens + new_tokens,
+            )
+            _send(user_id, reply_token, result.text or "✅ 對話已整理。", messaging_api)
+        return True
+
+    return False
+
 async def handle_line_message(
     event: "MessageEvent",
     runner: "ClaudeRunner",
@@ -45,6 +98,12 @@ async def handle_line_message(
     """
     user_id: str = event.source.user_id
     session_key = f"line:{user_id}"
+
+    # Handle Rich Menu commands first (fast path, no Claude invocation)
+    text = event.message.text.strip()
+    if text.lower() in _LINE_COMMANDS:
+        await _handle_line_command(text, user_id, event.reply_token, sessions, runner, messaging_api)
+        return
 
     # 1. Get existing session
     row = await sessions.get(session_key)
@@ -62,7 +121,7 @@ async def handle_line_message(
     # 3. Run Claude (with automatic stale-session recovery)
     try:
         result, effective_session_id = await _run_with_recovery(
-            runner, sessions, session_key, event.message.text, existing_session_id
+            runner, sessions, session_key, text, existing_session_id
         )
     except Exception:
         logger.exception("runner.run() raised an exception for user %s", user_id)
