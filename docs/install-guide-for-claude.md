@@ -11,37 +11,33 @@ You are guiding a user through installing raise-a-bull so they end up with a wor
 
 **Core principle:** One step at a time. Confirm each step works before continuing.
 
----
-
-## Phase 1 — Prerequisites
-
-Ask the user to run each check. Wait for their output before continuing.
-
-```bash
-# 1. Docker
-docker --version        # Need 24+
-docker compose version  # Need v2 (not v1 docker-compose)
-
-# 2. Git
-git --version
-
-# 3. Claude Code CLI
-claude --version        # Need 2.x+
-
-# 4. Claude Code is authenticated
-claude -p "say hi" --output-format stream-json 2>&1 | head -3
-# Must show {"type":"system",...} — if it prompts for login, stop and help them log in first
-```
-
-**If Claude Code isn't installed:**
-```bash
-npm install -g @anthropic-ai/claude-code
-claude   # follow the login flow
-```
-
-**Stop if any prerequisite fails.** Don't proceed until all four pass.
+> **Prerequisites required first.** Before starting, confirm the user has completed `docs/prerequisites-for-claude.md` — accounts (Claude Max, LINE Developer, Cloudflare) and software (Docker, Node, Claude Code CLI, cloudflared) must all be installed and verified. If not, stop and guide them through it first.
 
 ---
+
+## Phase 1 — Quick Prerequisites Check
+
+Run the final checklist from `prerequisites-for-claude.md`:
+
+```bash
+docker --version        && echo "✓ Docker"
+docker compose version  && echo "✓ Docker Compose"
+git --version           && echo "✓ Git"
+node --version          && echo "✓ Node"
+claude --version        && echo "✓ Claude Code CLI"
+cloudflared --version   && echo "✓ cloudflared"
+claude -p "say hi" --output-format stream-json 2>&1 | grep -q "type" && echo "✓ Claude auth"
+```
+
+**All seven must show ✓.** If any fail, stop and fix via `prerequisites-for-claude.md`.
+
+> **PATH note (Linux):** If `claude` is not found after install, add it:
+> ```bash
+> echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
+> ```
+> Also set `CLAUDE_BIN` to the full path in `.env` (Phase 5).
+
+## Phase 2 — Clone
 
 ## Phase 2 — Clone & Configure
 
