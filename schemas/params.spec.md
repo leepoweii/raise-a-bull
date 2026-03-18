@@ -28,8 +28,8 @@
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `brand.name` | string | required | -- | Brand name in primary language (e.g. `"夢酒館"`). |
-| `brand.name_en` | string | optional | -- | English brand name (e.g. `"Meng Bar"`). |
+| `brand.name` | string | required | -- | Brand name in primary language (e.g. `"培力站"`). |
+| `brand.name_en` | string | optional | -- | English brand name (e.g. `"Peili Station"`). |
 | `brand.primary_color` | string (hex) | optional | -- | Primary brand color (e.g. `"#2D1B69"`). |
 | `brand.accent_color` | string (hex) | optional | -- | Accent color (e.g. `"#F5A623"`). |
 | `brand.font_cn` | string | optional | `"Noto Sans TC"` | Chinese font family. |
@@ -70,8 +70,8 @@
 ```json
 {
   "brand": {
-    "name": "夢酒館",
-    "name_en": "Meng Bar",
+    "name": "培力站",
+    "name_en": "Peili Station",
     "primary_color": "#2D1B69",
     "accent_color": "#F5A623",
     "font_cn": "Noto Sans TC",

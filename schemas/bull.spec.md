@@ -16,7 +16,7 @@
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `instance_id` | string (kebab-case) | required | -- | Unique identifier for this instance. Must match `^[a-z0-9]+(-[a-z0-9]+)*$`. |
-| `display_name` | string | required | -- | Human-readable name, typically Chinese (e.g. `"夢酒館"`). |
+| `display_name` | string | required | -- | Human-readable name, typically Chinese (e.g. `"培力站"`). |
 | `preset` | string enum | required | -- | One of: `bar`, `association`, `shop`, `office`. Determines default skill set. |
 | `region` | string | required | `"kinmen"` | Deployment region. Currently only `kinmen` is supported. |
 | `created_at` | string (ISO 8601) | required | -- | Timestamp when `raise.sh` first created this instance. |
@@ -44,16 +44,16 @@
 
 ```json
 {
-  "instance_id": "meng-bar",
-  "display_name": "夢酒館",
-  "preset": "bar",
+  "instance_id": "peili-station",
+  "display_name": "培力站",
+  "preset": "association",
   "region": "kinmen",
   "created_at": "2026-03-13T10:00:00+08:00",
-  "workspace_root": "/Users/pwlee/Documents/Bulls/meng-bar",
+  "workspace_root": "/home/user/bulls/peili-station/workspace",
   "raise_a_bull_version": "0.1.0",
   "skills_version": "0.1.0",
-  "skills_installed": ["morning-review", "generate-content", "evening-review"],
-  "channels": ["line"],
+  "skills_installed": ["identity-update", "calendar-manager", "follow-up-tracker", "document-draft", "knowledge-base", "weather-cwa"],
+  "channels": ["discord", "line"],
   "managed_paths": ["skills/managed/", "identity/managed/", "managed-state.json", "IDENTITY.md"],
   "unmanaged_paths": ["SOUL.md", "memory/", "skills/local/", "identity/local/", "secrets/"]
 }

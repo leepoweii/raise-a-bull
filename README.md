@@ -14,7 +14,7 @@ git clone https://github.com/leepoweii/raise-a-bull.git
 cd raise-a-bull
 
 # 2. Raise — 用 preset 生成一頭牛
-./scripts/raise.sh --preset bar --name 小茉
+./scripts/raise.sh --preset association --name "阿牛"
 
 # 3. Fill secrets & start
 cp secrets/.env.example secrets/.env
@@ -72,7 +72,7 @@ raise-a-bull/
 
 | Preset | 說明 | 適用場景 |
 |---|---|---|
-| `bar` | 酒吧助理 | 夢酒館、小型餐飲 |
+| `bar` | 酒吧助理 | 小型餐飲、酒吧 |
 | `association` | 協會助理 | 社區發展協會、地方團體 |
 | `shop` | 店家助理 | 零售、伴手禮店 |
 | `office` | 辦公室助理 | 工作站、一般辦公室 |
