@@ -17,13 +17,19 @@ An open-source personal AI operating system built around Claude Code. You deploy
 
 ## Quick Start
 
-### Option A — Zeabur (recommended for non-developers)
+### Option A — Let Claude guide you (recommended)
+
+Paste the contents of [](docs/install-guide-for-claude.md) into a Claude conversation. Claude will walk you through the entire setup interactively — checking prerequisites, guiding you through LINE and Discord consoles, and verifying everything works.
+
+
+
+### Option B — Zeabur (recommended for non-developers)
 
 1. Click **Deploy to Zeabur** *(button coming soon)*
 2. Fill in your environment variables (see `.env.example`)
 3. Add your bot on LINE — say hi
 
-### Option B — Local machine
+### Option C — Local machine (manual)
 
 ```bash
 # 1. Clone
