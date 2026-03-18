@@ -1,0 +1,19 @@
+{
+  "name": "shop",
+  "display_name": "店家",
+  "skills": [
+    "identity-update",
+    "weather-cwa",
+    "knowledge-base",
+    "image-generation"
+  ],
+  "channels": ["line"],
+  "integrations": {
+    "cwa": true
+  },
+  "suggested_additions": [
+    "calendar-manager",
+    "follow-up-tracker",
+    "document-draft"
+  ]
+}

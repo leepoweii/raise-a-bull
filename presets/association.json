@@ -1,0 +1,24 @@
+{
+  "name": "association",
+  "display_name": "協會 / 工作站",
+  "skills": [
+    "identity-update",
+    "calendar-manager",
+    "follow-up-tracker",
+    "document-draft",
+    "knowledge-base",
+    "weather-cwa"
+  ],
+  "channels": ["discord", "line"],
+  "integrations": {
+    "google_calendar": true,
+    "google_tasks": true,
+    "gmail": true,
+    "cwa": true
+  },
+  "suggested_additions": [
+    "inbox-triage",
+    "meeting-notes",
+    "image-generation"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "name": "office",
+  "display_name": "辦公室",
+  "skills": [
+    "identity-update",
+    "calendar-manager",
+    "follow-up-tracker",
+    "document-draft",
+    "knowledge-base",
+    "weather-cwa",
+    "inbox-triage",
+    "meeting-notes"
+  ],
+  "channels": ["discord", "line"],
+  "integrations": {
+    "google_calendar": true,
+    "google_tasks": true,
+    "gmail": true,
+    "cwa": true
+  },
+  "suggested_additions": [
+    "image-generation",
+    "daily-review"
+  ]
+}
