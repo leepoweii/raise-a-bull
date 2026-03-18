@@ -111,6 +111,7 @@ class ClaudeRunner:
             stdin=DEVNULL,
             stdout=PIPE,
             stderr=PIPE,
+            cwd=self.workspace if self.workspace else None,
         )
 
         # Drain stderr in the background to prevent pipe buffer deadlock when

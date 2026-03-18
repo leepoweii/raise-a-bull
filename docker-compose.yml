@@ -9,6 +9,7 @@ services:
     volumes:
       - ./workspace:/app/workspace:ro
       - daniu-data:/app/data
+      - /home/samantha-machine/.claude/.credentials.json:/root/.claude/.credentials.json:ro
     networks:
       - default
       - agents-net
