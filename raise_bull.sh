@@ -117,7 +117,7 @@ echo ""
 
 LINE_SECRET=$(gum input --password --placeholder "LINE Channel Secret" --prompt "? LINE Channel Secret  ")
 LINE_TOKEN=$(gum input --password --placeholder "LINE Channel Access Token" --prompt "? LINE Access Token    ")
-LINE_USER_ID=$(gum input --placeholder "LINE User ID (Uxxxxx...)" --prompt "? LINE User ID         ")
+LINE_USER_ID=$(gum input --placeholder "Basic Settings → Your user ID (optional, press Enter to skip)" --prompt "? LINE User ID         ")
 
 DISCORD_TOKEN=""
 DISCORD_GUILD=""
