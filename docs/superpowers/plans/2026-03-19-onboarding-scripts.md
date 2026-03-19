@@ -155,7 +155,7 @@ brew_install gum
 # ── 5. gh (GitHub CLI) ──────────────────────────────
 brew_install gh
 
-# ── 6. cloudflared) ─────────────────────────────────
+# ── 6. cloudflared ───────────────────────────────────
 brew_install cloudflared
 
 # ── 7. Docker network (agents-net) ────────────────────────────
@@ -527,7 +527,7 @@ cat > bots/start-bot.sh << 'SCRIPT'
 # start-bot.sh — Launch a raise-a-bull bot instance
 # Usage: bash start-bot.sh <bot-name>
 # Copy this to ~/bots/start-bot.sh on the host machine (raise_bull.sh does this automatically).
-set -e
+set -euo pipefail
 
 BOT="$1"
 if [[ -z "$BOT" ]]; then
@@ -587,6 +587,16 @@ if [[ ! -d "$REPO_DIR" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$HOME/bots/start-bot.sh" ]]; then
+    echo "ERROR: ~/bots/start-bot.sh not found. Run raise_bull.sh first." >&2
+    exit 1
+fi
+
+if [[ ! -f "$HOME/bots/$BOT/.env" ]]; then
+    echo "ERROR: ~/bots/$BOT/.env not found. Run: bash raise_bull.sh $BOT" >&2
+    exit 1
+fi
+
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Upgrading raise-a-bull engine..."
 echo "(Your workspace, identity, memory, and sessions are untouched)"
@@ -614,12 +624,12 @@ bash -n bots/upgrade_bull.sh && echo "✓ upgrade_bull.sh syntax OK"
 
 - [ ] **Step 4: Update `raise_bull.sh` to also copy `upgrade_bull.sh`**
 
-In `raise_bull.sh`, find the block that copies `start-bot.sh` and add the upgrade script alongside it:
+In `raise_bull.sh`, find the block that copies `start-bot.sh` and replace it with:
 
 ```bash
 # In raise_bull.sh — replace the start-bot.sh copy block with:
+mkdir -p "$HOME/bots"
 if [[ ! -f "$HOME/bots/start-bot.sh" ]]; then
-    mkdir -p "$HOME/bots"
     cp "$REPO_DIR/bots/start-bot.sh" "$HOME/bots/start-bot.sh"
     chmod +x "$HOME/bots/start-bot.sh"
 fi
@@ -629,7 +639,7 @@ if [[ ! -f "$HOME/bots/upgrade_bull.sh" ]]; then
 fi
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Commit `bots/` scripts**
 
 ```bash
 git add bots/start-bot.sh bots/upgrade_bull.sh
@@ -637,6 +647,13 @@ git commit -m "feat: add bots/start-bot.sh and upgrade_bull.sh to repo
 
 upgrade_bull.sh: git pull engine + restart bot in one command.
 Context (workspace, identity, memory, sessions.db) is never touched."
+```
+
+- [ ] **Step 6: Commit `raise_bull.sh` update**
+
+```bash
+git add raise_bull.sh
+git commit -m "feat: raise_bull.sh also installs upgrade_bull.sh to ~/bots/"
 ```
 
 ---
@@ -900,7 +917,7 @@ Go to LINE Developers Console → Messaging API tab → Webhook settings:
 2. Send "hi"
 3. Bot should respond within 10–30 seconds
 
-Check logs while waiting:
+Check logs while waiting (replace `mybot` with the bot name you chose in Phase 8):
 ```bash
 docker logs bull-mybot --tail 30 -f
 ```
