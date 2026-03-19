@@ -4,6 +4,17 @@ An open-source personal AI operating system built around Claude Code. You deploy
 
 ---
 
+## Deploy to Zeabur
+
+[![Deploy to Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/new?template=PLACEHOLDER_TEMPLATE_ID)
+
+> **Note for maintainer:** Replace `PLACEHOLDER_TEMPLATE_ID` with the actual ID after running:
+> ```bash
+> npx zeabur@latest template create -f template.yaml
+> ```
+
+---
+
 ## Requirements
 
 - **Claude Max** (~$20/mo) — required. raise-a-bull runs `claude -p` under the hood; no Claude Max, no bot.
