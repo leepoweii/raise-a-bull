@@ -45,6 +45,15 @@ set +a
 export BOT_ENV_FILE="$ENV_FILE"
 
 cd "$ENGINE_DIR"
-docker compose -p "bull-$BOT" up -d --build
+
+# Support both docker compose v2 (subcommand) and v1 (docker-compose)
+if docker compose version &>/dev/null; then
+    docker compose -p "bull-$BOT" up -d --build
+elif command -v docker-compose &>/dev/null; then
+    docker-compose -p "bull-$BOT" up -d --build
+else
+    echo "ERROR: Neither 'docker compose' nor 'docker-compose' found." >&2
+    exit 1
+fi
 
 echo "Started bull-$BOT on port $BOT_PORT"
