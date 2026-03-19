@@ -46,11 +46,15 @@ One-time dependency installer. Called by Claude subagent in background while use
 
 | Package | macOS | WSL/Linux |
 |---------|-------|-----------|
+| Homebrew | install.sh from brew.sh (macOS only) | — (not used) |
 | Docker | brew install --cask docker + open -a Docker + wait for daemon | get.docker.com + usermod -aG docker $USER |
 | Node.js | brew install node | nodesource setup_20.x |
 | gum | brew install gum | go install / binary release |
 | gh | brew install gh (optional) | apt (optional) |
 | cloudflared | brew install cloudflared (optional) | .deb binary (optional) |
+
+**macOS install order:** Homebrew → Docker → Node → gum → gh → cloudflared
+All subsequent macOS installs depend on Homebrew being present first.
 
 **macOS Docker special case:**
 ```bash
