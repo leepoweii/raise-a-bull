@@ -22,13 +22,20 @@ ENABLE_MINIMAX=false
 
 for arg in "$@"; do
     case "$arg" in
-        --port=*)    PORT="${arg#--port=}" ;;
+        --port=*)    PORT="${arg#--port=}"
+                     [[ "$PORT" =~ ^[0-9]+$ ]] || { echo "ERROR: --port must be a number, got: $PORT" >&2; exit 1; }
+                     ;;
         --domain=*)  DOMAIN="${arg#--domain=}" ;;
         --discord)   ENABLE_DISCORD=true ;;
         --minimax)   ENABLE_MINIMAX=true ;;
         *) echo "Unknown flag: $arg" >&2; exit 1 ;;
     esac
 done
+
+if ! command -v gum &>/dev/null; then
+    echo "ERROR: 'gum' is required but not found. Run build_barn.sh first." >&2
+    exit 1
+fi
 
 REPO_DIR="$HOME/raise-a-bull"
 BOT_DIR="$HOME/bots/$BOT_NAME"
@@ -74,9 +81,12 @@ if [[ ! -f "$CREDS_FILE" ]]; then
     exit 1
 fi
 # base64 portability: macOS uses -b 0, Linux uses -w 0, fallback strips newlines
-CLAUDE_CREDENTIALS=$(base64 -w 0 "$CREDS_FILE" 2>/dev/null \
+CLAUDE_CREDENTIALS=$(
+    base64 -w 0 "$CREDS_FILE" 2>/dev/null \
     || base64 -b 0 "$CREDS_FILE" 2>/dev/null \
-    || base64 "$CREDS_FILE" | tr -d '\n')
+    || base64 "$CREDS_FILE"
+)
+CLAUDE_CREDENTIALS="${CLAUDE_CREDENTIALS//$'\n'/}"
 echo "✓ Claude credentials read"
 
 # ── 5. Collect secrets via gum ───────────────────────────────
@@ -112,16 +122,19 @@ if [[ "$ENABLE_MINIMAX" == "true" ]]; then
     CLAUDE_MODEL_VALUE="$MINIMAX_MODEL"
 fi
 
+# Create .env with correct permissions atomically before writing any secrets
+install -m 600 /dev/null "$ENV_FILE"
+
 # Start with non-secret config (unquoted heredoc — variables expand intentionally)
 cat > "$ENV_FILE" << ENVEOF
 # --- Compose-level vars ---
-BOT_NAME=$BOT_NAME
+BOT_NAME="$BOT_NAME"
 BOT_PORT=$PORT
-WORKSPACE_PATH=$WORKSPACE_DIR
+WORKSPACE_PATH="$WORKSPACE_DIR"
 
 # --- Container env vars ---
 CLAUDE_BIN=claude
-CLAUDE_MODEL=$CLAUDE_MODEL_VALUE
+CLAUDE_MODEL="$CLAUDE_MODEL_VALUE"
 WORKSPACE=/app/workspace
 DB_PATH=/app/workspace/data/sessions.db
 MAX_DAILY_HEARTBEAT_TRIGGERS=20
@@ -161,6 +174,7 @@ elapsed=0
 until curl -sf "http://localhost:$PORT/health" &>/dev/null; do
     sleep 3
     elapsed=$((elapsed + 3))
+    echo "  ...waiting (${elapsed}s / ${timeout}s)"
     if [[ $elapsed -ge $timeout ]]; then
         echo "Bot did not respond within ${timeout}s. Check logs:" >&2
         echo "  docker logs bull-$BOT_NAME --tail 30" >&2
