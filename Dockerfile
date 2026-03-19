@@ -17,6 +17,8 @@ COPY workspace.example/ /app/workspace.example/
 
 RUN uv sync --no-dev
 
+RUN mkdir -p /app/data /app/workspace
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
