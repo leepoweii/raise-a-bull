@@ -79,19 +79,33 @@ fi
 
 # ── 4. Read Claude credentials ────────────────────────────────
 CREDS_FILE="$HOME/.claude/.credentials.json"
-if [[ ! -f "$CREDS_FILE" ]]; then
-    echo "ERROR: ~/.claude/.credentials.json not found." >&2
+CREDS_RAW=""
+
+if [[ -f "$CREDS_FILE" ]]; then
+    CREDS_RAW=$(cat "$CREDS_FILE")
+    echo "✓ Claude credentials read from file"
+elif command -v security &>/dev/null; then
+    # macOS Keychain: newer Claude Code stores credentials here
+    CREDS_RAW=$(security find-generic-password -s "Claude Code-credentials" -w 2>/dev/null || true)
+    if [[ -n "$CREDS_RAW" ]]; then
+        echo "✓ Claude credentials read from macOS Keychain"
+    fi
+fi
+
+if [[ -z "$CREDS_RAW" ]]; then
+    echo "ERROR: Claude credentials not found." >&2
+    echo "Checked: ~/.claude/.credentials.json and macOS Keychain (Claude Code-credentials)" >&2
     echo "Make sure Claude Code is installed and you are logged in: claude --version" >&2
     exit 1
 fi
+
 # base64 portability: macOS uses -b 0, Linux uses -w 0, fallback strips newlines
 CLAUDE_CREDENTIALS=$(
-    base64 -w 0 "$CREDS_FILE" 2>/dev/null \
-    || base64 -b 0 "$CREDS_FILE" 2>/dev/null \
-    || base64 "$CREDS_FILE"
+    printf '%s' "$CREDS_RAW" | base64 -w 0 2>/dev/null \
+    || printf '%s' "$CREDS_RAW" | base64 -b 0 2>/dev/null \
+    || printf '%s' "$CREDS_RAW" | base64
 )
 CLAUDE_CREDENTIALS="${CLAUDE_CREDENTIALS//$'\n'/}"
-echo "✓ Claude credentials read"
 
 # ── 5. Collect secrets via gum ───────────────────────────────
 echo ""
