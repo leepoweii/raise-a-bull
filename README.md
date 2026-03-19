@@ -54,85 +54,22 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
 
 ## Quick Start
 
-### Step 1 — Clone the engine
+**Prerequisite:** [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated.
+
+Open a terminal in the repo directory and launch Claude Code:
 
 ```bash
-git clone https://github.com/yourname/raise-a-bull.git
+claude
 ```
 
-### Step 2 — Create your first bot instance
-
-```bash
-# Create instance directory
-mkdir -p ~/bots/mybot
-
-# Copy the env template
-cp ~/raise-a-bull/.env.example ~/bots/mybot/.env
-
-# Seed the workspace
-cp -r ~/raise-a-bull/workspace.example/. ~/bots/mybot/workspace/
+Then reference the install guide:
+```
+@docs/install-guide-for-claude.md
 ```
 
-### Step 3 — Fill in your identity
+Claude will orchestrate the full setup — installing dependencies, guiding account creation, and starting your bot.
 
-Edit `~/bots/mybot/workspace/identity/profile.md` — give your bot a name and personality.  
-Edit `~/bots/mybot/workspace/identity/context.md` — tell it about you.
-
-This is the only content you need to touch.
-
-### Step 4 — Configure secrets
-
-Edit `~/bots/mybot/.env`:
-
-```env
-# Compose vars
-BOT_NAME=mybot
-BOT_PORT=18888
-WORKSPACE_PATH=/home/yourname/bots/mybot/workspace
-
-# Container vars
-CLAUDE_BIN=claude
-CLAUDE_MODEL=claude-sonnet-4-6
-WORKSPACE=/app/workspace
-DB_PATH=/app/workspace/data/sessions.db
-
-# LINE
-LINE_CHANNEL_ACCESS_TOKEN=...
-LINE_CHANNEL_SECRET=...
-LINE_USER_ID=...
-
-# Discord (optional)
-DISCORD_BOT_TOKEN=
-DISCORD_GUILD_ID=
-
-# Claude auth (base64 of ~/.claude/.credentials.json)
-CLAUDE_CREDENTIALS=...
-```
-
-For a guided walkthrough of LINE and Discord setup, paste [docs/install-guide-for-claude.md](docs/install-guide-for-claude.md) into a Claude conversation.
-
-### Step 5 — Copy the launch helper
-
-```bash
-cp ~/raise-a-bull/bots/start-bot.sh ~/bots/start-bot.sh
-chmod +x ~/bots/start-bot.sh
-```
-
-### Step 6 — Start
-
-```bash
-cd ~/bots && bash start-bot.sh mybot
-curl http://localhost:18888/health
-# {"status":"ok","version":"0.1.0"}
-```
-
-### Step 7 — Expose webhook
-
-```bash
-cloudflared tunnel --url http://localhost:18888
-```
-
-Set the printed URL as your LINE webhook: `https://<tunnel>/webhook/line`
+> ⚠️ Keep your LINE/Discord tokens in a local notepad. You will enter them securely in the terminal at the end — never paste secrets into the chat.
 
 ---
 
