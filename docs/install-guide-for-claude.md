@@ -1,269 +1,211 @@
 ---
 name: raise-a-bull-install
-description: Use when helping a user install and set up raise-a-bull — a Claude Code bot framework for LINE and Discord. Guides the full installation from prerequisites to first successful bot response.
+description: Use when helping a user install and set up raise-a-bull — a Claude Code bot framework for LINE and Discord. Orchestrates full installation from prerequisites to first bot response.
 ---
 
-# raise-a-bull Installation Guide
+# raise-a-bull Installation Guide (Claude Orchestration)
 
-## Overview
+## Your role
 
-You are guiding a user through installing raise-a-bull so they end up with a working personal AI bot on LINE and/or Discord. Work interactively — run checks, wait for their outputs, catch problems before moving to the next step. Never skip a verification.
+You are orchestrating the complete raise-a-bull onboarding. Work interactively — confirm each step before proceeding. You run the technical steps; the user handles web consoles.
 
-**Core principle:** One step at a time. Confirm each step works before continuing.
-
-> **Prerequisites required first.** Before starting, confirm the user has completed `docs/prerequisites-for-claude.md` — accounts (Claude Max, LINE Developer, Cloudflare) and software (Docker, Node, Claude Code CLI, cloudflared) must all be installed and verified. If not, stop and guide them through it first.
+> ⚠️ **SECURITY — Show this immediately, before anything else:**
+>
+> "Do NOT paste any tokens, secrets, or API keys into this chat.
+> Store everything in a local notepad as you collect it.
+> You will enter secrets securely in the terminal at the very end."
 
 ---
 
-## Phase 1 — Quick Prerequisites Check
+## Phase 1 — Verify Prerequisites
 
-Run the final checklist from `prerequisites-for-claude.md`:
+Claude Code is already running (that's how the user opened this guide). Check git:
 
 ```bash
-docker --version        && echo "✓ Docker"
-docker compose version  && echo "✓ Docker Compose"
-git --version           && echo "✓ Git"
-node --version          && echo "✓ Node"
-claude --version        && echo "✓ Claude Code CLI"
-cloudflared --version   && echo "✓ cloudflared"
-claude -p "say hi" --output-format stream-json 2>&1 | grep -q "type" && echo "✓ Claude auth"
+git --version && echo "✓ git"
 ```
 
-**All seven must show ✓.** If any fail, stop and fix via `prerequisites-for-claude.md`.
-
-> **PATH note (Linux):** If `claude` is not found after install, add it:
-> ```bash
-> echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-> ```
+If git is missing, ask the user to install it before continuing.
 
 ---
 
-## Phase 2 — Clone Engine & Create Instance
+## Phase 2 — Install Dependencies (background subagent)
 
-raise-a-bull uses a two-layer structure: a shared **engine** repo, and per-bot **instance** directories outside the repo.
+Clone the engine repo and dispatch a subagent to run `build_barn.sh` while you guide account setup in parallel.
 
 ```bash
-# 1. Clone the engine (shared, never edited per-bot)
-git clone https://github.com/leepoweii/raise-a-bull.git
-
-# 2. Create your first bot instance directory
-BOT=mybot   # change this to whatever you want to call your bot
-mkdir -p ~/bots/$BOT
-
-# 3. Copy env template into instance dir
-cp ~/raise-a-bull/.env.example ~/bots/$BOT/.env
-
-# 4. Seed workspace from template
-cp -r ~/raise-a-bull/workspace.example/. ~/bots/$BOT/workspace/
-
-# 5. Copy launch helper (one-time)
-cp ~/raise-a-bull/bots/start-bot.sh ~/bots/start-bot.sh
-chmod +x ~/bots/start-bot.sh
+# Clone engine repo if not already present
+if [ ! -d ~/raise-a-bull ]; then
+  git clone https://github.com/leepoweii/raise-a-bull.git ~/raise-a-bull
+fi
 ```
 
-Open `~/bots/$BOT/.env` in their editor. You will fill it in section by section in the next phases.
+Dispatch a **background subagent** to run:
+```bash
+bash ~/raise-a-bull/build_barn.sh
+```
 
-> **Structure note:** The engine repo stays untouched. All bot-specific content lives in `~/bots/<name>/`. This lets you run multiple bots from one engine installation.
+Tell the user: "I'm installing dependencies in the background — this takes a few minutes. While that runs, let's set up your accounts."
 
 ---
 
 ## Phase 3 — LINE Bot Setup
 
-Tell the user: *"Go to https://developers.line.biz and sign in. We'll create a Messaging API channel."*
+Tell the user to go to https://developers.line.biz and sign in.
 
-Walk them through these steps **one at a time**, waiting for confirmation at each:
+Guide them one step at a time, waiting for confirmation at each:
 
-1. **Create a Provider** (if they don't have one) → Providers → Create
-2. **Create a Channel** → Create a new channel → Messaging API
-3. Fill in: Channel name (e.g. "Callie"), category, description → Agree → Create
-4. Go to the **Messaging API** tab
-5. **Channel Secret** → Basic Settings tab → copy `Channel secret` → paste into `.env` as `LINE_CHANNEL_SECRET`
-6. **Channel Access Token** → Messaging API tab → scroll to "Channel access token" → Issue → copy → paste into `.env` as `LINE_CHANNEL_ACCESS_TOKEN`
-7. **Your LINE User ID** → Basic Settings tab → scroll to "Your user ID" (format: `Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`) → copy → paste into `.env` as `LINE_USER_ID`
-   - This is the LINE UID of your own account (the developer account logged into LINE Developers Console)
-   - If you can't find it here, skip it for now — see "Finding your LINE_USER_ID" in the Common Errors section
-8. **Disable auto-reply** → Messaging API tab → LINE Official Account features → Auto-reply messages → Edit → turn OFF
-9. **Disable greeting message** → same page → Greeting messages → turn OFF
+1. Create a Provider (if none exists) → Providers → Create
+2. Create a Channel → Messaging API → fill in name, category, description → Create
+3. **Channel Secret** → Basic Settings tab → copy `Channel secret` → save to notepad
+4. **Channel Access Token** → Messaging API tab → scroll to "Channel access token" → Issue → copy → save to notepad
+5. **LINE User ID** → Basic Settings tab → scroll to "Your user ID" (format: `Uxxxxxxxxx`) → copy → save to notepad
+   - If not visible, skip for now (recoverable from logs after first message)
+6. **Disable auto-reply** → Messaging API tab → LINE Official Account features → Auto-reply → Edit → OFF
+7. **Disable greeting** → same page → Greeting messages → OFF
 
-Leave the browser tab open — you'll need it again in Phase 7 to set the webhook URL.
+Leave this browser tab open — you'll paste the webhook URL here in Phase 10.
 
----
-
-## Phase 4 — Discord Bot Setup (optional)
-
-If the user wants Discord, walk them through:
-
-1. Go to https://discord.com/developers/applications → New Application → name it
-2. **Bot** tab → Add Bot → Reset Token → copy → paste into `.env` as `DISCORD_BOT_TOKEN`
-3. Enable **Message Content Intent** on the Bot tab (required for reading messages)
-4. **OAuth2** tab → URL Generator → scopes: `bot`, `applications.commands` → bot permissions: `Send Messages`, `Read Message History` → copy the generated URL
-5. Open the URL in a browser → select your server → Authorize
-6. Get your **Guild (Server) ID**: right-click your server name in Discord → Copy Server ID → paste into `.env` as `DISCORD_GUILD_ID`
-
-If they only want LINE, they can leave the Discord vars empty.
+*Reference: docs/screenshots/line/ (guides coming soon)*
 
 ---
 
-## Phase 4.5 — LLM Backend (optional: MiniMax instead of Claude subscription)
+## Phase 4 — Cloudflare Tunnel (choose one)
 
-By default the bot calls Claude via the CLI using your Claude subscription. If you want to use **MiniMax M2.7** (Anthropic-API-compatible, ~$0.30/$1.20 per M tokens) instead, set two extra vars in `.env`:
+Ask the user:
 
-```env
-MINIMAX_API_KEY=sk-api-xxxxxxxxxxxxxxxxxxxxxxxx   # your MiniMax API key
-CLAUDE_MODEL=MiniMax-M2.7                          # model name passed to --model flag
-```
+> "Do you want a permanent webhook URL (named tunnel) or a temporary one (quick tunnel — changes on restart)?"
 
-On every container start, `entrypoint.sh` detects `MINIMAX_API_KEY` and writes `/home/bull/.claude/settings.json` with the MiniMax base URL and auth token — completely isolated from your host Claude subscription.
+**Option A — Quick tunnel (easier, good for testing):**
+No setup needed now. You'll start it in Phase 10 with one command.
 
-To get a MiniMax API key: https://platform.minimax.io
+**Option B — Named tunnel (production):**
+Ask the user for their tunnel domain (e.g. `bot.example.com`). They need a Cloudflare account with a domain and the tunnel configured. Record the domain for Phase 8.
 
-> **Note:** If `MINIMAX_API_KEY` is not set, the bot uses your normal Claude subscription (no settings.json is written). You do not need this step unless you want a separate billing account for the bot.
-
----
-
-## Phase 5 — Configure .env and Get Claude Credentials
-
-Open `~/bots/$BOT/.env`. Fill in the compose-level vars at the top:
-
-```env
-# Compose-level vars (docker compose uses these for interpolation)
-BOT_NAME=mybot              # must match the directory name you chose
-BOT_PORT=18888              # pick any unused port
-WORKSPACE_PATH=/home/yourname/bots/mybot/workspace   # absolute path
-```
-
-Then get your Claude credentials:
-
-```bash
-# Encode your Claude credentials as base64
-base64 -w 0 ~/.claude/.credentials.json
-```
-
-Paste the output into `.env` as `CLAUDE_CREDENTIALS`.
-
-Verify the full `.env` looks like this (with real values):
-
-```env
-BOT_NAME=mybot
-BOT_PORT=18888
-WORKSPACE_PATH=/home/yourname/bots/mybot/workspace
-
-CLAUDE_BIN=claude
-CLAUDE_MODEL=claude-sonnet-4-6
-WORKSPACE=/app/workspace
-DB_PATH=/app/workspace/data/sessions.db
-MAX_DAILY_HEARTBEAT_TRIGGERS=20
-
-LINE_CHANNEL_ACCESS_TOKEN=<filled in Phase 3>
-LINE_CHANNEL_SECRET=<filled in Phase 3>
-LINE_USER_ID=<filled in Phase 3>
-
-DISCORD_BOT_TOKEN=<filled in Phase 4, or leave empty>
-DISCORD_GUILD_ID=<filled in Phase 4, or leave empty>
-
-CLAUDE_CREDENTIALS=<base64 string from above>
-```
+*Reference: docs/screenshots/cloudflare/ (guides coming soon)*
 
 ---
 
-## Phase 6 — Personalize Your Bot
+## Phase 5 — Discord (optional)
 
-Edit the identity files in `~/bots/$BOT/workspace/identity/`:
+Ask: "Do you want Discord support in addition to LINE?"
 
-```bash
-$EDITOR ~/bots/$BOT/workspace/identity/profile.md   # who the bot is, name, tone
-$EDITOR ~/bots/$BOT/workspace/identity/context.md   # about you and your work
-```
+If yes, guide them through https://discord.com/developers/applications:
 
-`expertise.md` is optional — fill it in if this bot has a specific focus (e.g. customer service for a particular product, or a specialized knowledge domain).
+1. New Application → name it
+2. Bot tab → Add Bot → Reset Token → copy → save to notepad as Discord Token
+3. Enable **Message Content Intent** (Bot tab)
+4. OAuth2 → URL Generator → scopes: `bot`, `applications.commands` → permissions: `Send Messages`, `Read Message History` → copy generated URL → open in browser → authorize to their server
+5. Right-click server name in Discord → Copy Server ID → save to notepad as Discord Guild ID
 
-> **This is the only content you need to customize.** Everything else (memory, skills, sessions) is managed automatically.
-
----
-
-## Phase 7 — Start the Bot
-
-Create the data directory and start:
-
-```bash
-mkdir -p ~/bots/$BOT/workspace/data
-
-cd ~/bots && bash start-bot.sh $BOT
-```
-
-Wait ~20 seconds (first run builds the Docker image), then check:
-
-```bash
-curl http://localhost:18888/health
-# {"status":"ok","version":"0.1.0"}
-```
-
-Check logs while it starts:
-
-```bash
-docker logs bull-$BOT --tail 30
-```
-
-Look for:
-- `Claude credentials written.` — auth OK
-- `MiniMax settings.json written.` — if using MiniMax
-- `raise-a-bull startup complete` — app ready
-
-**If it fails:** check logs carefully. Most common causes:
-- Missing required env var (`LINE_CHANNEL_SECRET` or `LINE_CHANNEL_ACCESS_TOKEN`)
-- Wrong `WORKSPACE_PATH` (must be absolute, directory must exist)
-- Port already in use (change `BOT_PORT` in `.env`)
-- `CLAUDE_CREDENTIALS` invalid (re-run the base64 encode command)
+*Reference: docs/screenshots/discord/ (guides coming soon)*
 
 ---
 
-## Phase 8 — Expose Webhook (Cloudflare Tunnel)
+## Phase 6 — MiniMax (optional — shared/team use only)
 
-The bot needs a public HTTPS URL. Cloudflare Tunnel is free and works without port-forwarding.
+Ask: "Will this bot be shared among multiple users (e.g. a group LINE chat with different people)?"
 
-> **⚠️ Named tunnel conflict:** If you already have a Cloudflare named tunnel running, the quick tunnel may return 404 due to a catch-all rule. Add a new ingress rule to your named tunnel's `config.yml` instead.
+If yes, MiniMax is required (avoids violating Claude single-account policy):
+Guide them to https://platform.minimax.io → get API key → save to notepad.
+
+If no (personal single-user bot): skip this phase.
+
+*Reference: docs/screenshots/minimax/ (guides coming soon)*
+
+---
+
+## Phase 7 — Confirm build_barn.sh Complete
+
+Check that the background subagent from Phase 2 has finished. Verify:
 
 ```bash
-# Start a temporary tunnel (skip if you have a named tunnel)
+docker --version      && echo "✓ Docker"
+docker info           && echo "✓ Docker daemon"
+node --version        && echo "✓ Node"
+gum --version         && echo "✓ gum"
+cloudflared --version && echo "✓ cloudflared"
+```
+
+All must show ✓. If any fail, run `bash ~/raise-a-bull/build_barn.sh` directly and wait.
+
+---
+
+## Phase 8 — Create Bot Instance
+
+Collect from the user (non-sensitive — ask in chat):
+- Bot name (e.g. `mybot`)
+- Port (default: `18888`)
+- Tunnel domain from Phase 4, or none (quick tunnel)
+- Whether to enable Discord (from Phase 5)
+- Whether to enable MiniMax (from Phase 6)
+
+> ⚠️ **SECURITY REMINDER — Show this again before running raise_bull.sh:**
+>
+> "About to enter secrets. Your terminal will prompt you for each key.
+> Type or paste ONLY into the terminal prompts — not here in chat."
+
+Build the command based on what you collected and run it. For example:
+
+```bash
+# Always include --port. Add --domain only if they have a named tunnel.
+# Add --discord only if Phase 5 was completed. Add --minimax only if Phase 6 was completed.
+bash ~/raise-a-bull/raise_bull.sh mybot --port=18888
+
+# With named tunnel: bash ~/raise-a-bull/raise_bull.sh mybot --port=18888 --domain=bot.example.com
+# With Discord:      add --discord
+# With MiniMax:      add --minimax
+```
+
+The script will:
+- Seed `~/bots/mybot/workspace/` from the template
+- Prompt for all secrets in the terminal (not in chat)
+- Write `~/bots/mybot/.env` (chmod 600)
+- Start the Docker container
+- Wait for /health and print the webhook URL
+
+---
+
+## Phase 9 — Personalize Bot Identity
+
+After raise_bull.sh completes, open the identity files:
+
+```bash
+$EDITOR ~/bots/mybot/workspace/identity/profile.md   # bot name, personality, tone
+$EDITOR ~/bots/mybot/workspace/identity/context.md   # about the owner
+```
+
+`expertise.md` is optional — fill in if the bot has a specialized focus.
+
+---
+
+## Phase 10 — Set Webhook URL
+
+**If using quick tunnel** — run this in a separate terminal (keep it running):
+```bash
 cloudflared tunnel --url http://localhost:18888
 ```
+Copy the `https://xxxx.trycloudflare.com` URL.
 
-Copy the printed `https://xxxx.trycloudflare.com` URL.
+**If using named tunnel** — webhook URL is `https://your-domain.com`.
 
-Go back to the LINE Developers Console → Messaging API tab → Webhook settings:
-1. Paste `https://xxxx.trycloudflare.com/webhook/line` as the Webhook URL
-   - **The path must be exactly `/webhook/line`**
+Go to LINE Developers Console → Messaging API tab → Webhook settings:
+1. Paste `https://<your-url>/webhook/line` — path must be exactly `/webhook/line`
 2. Toggle **Use webhook** ON
 3. Click **Verify** → should show "Success"
 
-**Note:** The `trycloudflare.com` URL changes every restart. For a permanent URL, set up a named tunnel.
-
 ---
 
-## Phase 9 — Verify
+## Phase 11 — Verify
 
-1. Open LINE, find the bot by its Basic ID (LINE Developers Console → Basic Settings → Bot basic ID, starts with `@`)
-2. Add it as a friend
-3. Send "hi"
-4. The bot should respond within 10–30 seconds
+1. Open LINE → find the bot by Basic ID (Basic Settings → Bot basic ID, starts with `@`) → Add as friend
+2. Send "hi"
+3. Bot should respond within 10–30 seconds
 
-Check logs while waiting:
+Check logs while waiting (replace `mybot` with the bot name you chose in Phase 8):
 ```bash
-docker logs bull-$BOT --tail 30 -f
-# You should see: POST /webhook/line 200 OK
+docker logs bull-mybot --tail 30 -f
 ```
-
----
-
-## Phase 10 — LINE Rich Menu (optional but recommended)
-
-The rich menu adds a persistent button bar at the bottom of the LINE chat with **New Session**, **Session Info**, and **Compact** buttons.
-
-```bash
-docker compose -p "bull-$BOT" run --rm bot python -m raisebull.setup_rich_menu
-```
-
-After running, send any message to the bot on LINE — the menu bar will appear.
 
 ---
 
@@ -271,43 +213,30 @@ After running, send any message to the bot on LINE — the menu bar will appear.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `LINE_CHANNEL_SECRET must be set` | Empty env var | Check `.env` file |
-| Webhook Verify fails with 404 | Wrong URL path | Make sure URL ends with `/webhook/line` |
-| Container exits immediately | Bad `CLAUDE_CREDENTIALS` | Re-encode: `base64 -w 0 ~/.claude/.credentials.json` |
-| Bot gets `⚠️ exit 1` | Stale session | Send another message — auto-recovers |
-| Bot says "(no response)" | Claude invocation error | Check `docker logs bull-$BOT` |
-| Discord bot not appearing | Missing Message Content Intent | Enable on Discord Developer Portal |
+| `LINE_CHANNEL_SECRET must be set` | Empty env var | Re-run raise_bull.sh |
+| Webhook Verify fails 404 | Wrong URL path | URL must end with `/webhook/line` |
+| Container exits immediately | Bad `CLAUDE_CREDENTIALS` | Check `~/.claude/.credentials.json` exists and re-run raise_bull.sh |
+| Bot says "(no response)" | Claude invocation error | Check `docker logs bull-mybot` |
+| Discord bot offline | Missing Message Content Intent | Enable on Discord Developer Portal |
+| `network agents-net not found` | Docker network missing | Run `docker network create agents-net` then retry |
 
-### Finding your LINE_USER_ID
+### Finding LINE_USER_ID from logs
 
-If you couldn't find your User ID in the LINE Developers Console:
-
-1. Make sure the bot is running and the webhook is set
-2. Add the bot as a friend on LINE and send any message
-3. Run: `docker logs bull-$BOT | grep "line:U"`
-4. Copy the `Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx` value → paste as `LINE_USER_ID`
-5. Restart: `cd ~/bots && bash start-bot.sh $BOT`
+If you skipped LINE User ID in Phase 3:
+1. Make sure bot is running and webhook is set
+2. Add bot on LINE and send any message
+3. Run: `docker logs bull-mybot | grep "line:U"`
+4. Copy the `Uxxxxxxxxxxxxxxxx` value → edit `~/bots/mybot/.env` → restart: `bash ~/bots/start-bot.sh mybot`
 
 ---
 
-## Adding a Second Bot Instance
+## Adding a Second Bot
+
+Run raise_bull.sh again with a different name and port:
 
 ```bash
-BOT2=work   # or any name
-
-mkdir -p ~/bots/$BOT2
-cp ~/raise-a-bull/.env.example ~/bots/$BOT2/.env
-cp -r ~/raise-a-bull/workspace.example/. ~/bots/$BOT2/workspace/
-mkdir -p ~/bots/$BOT2/workspace/data
-
-# Edit .env: set BOT_NAME=$BOT2, BOT_PORT=18889 (different port!), WORKSPACE_PATH=...
-$EDITOR ~/bots/$BOT2/.env
-
-# Edit identity
-$EDITOR ~/bots/$BOT2/workspace/identity/profile.md
-
-# Start
-bash ~/bots/start-bot.sh $BOT2
+bash ~/raise-a-bull/raise_bull.sh workbot --port=18889
+# Add --discord / --minimax as needed
 ```
 
-Each instance runs independently on its own port with its own identity, memory, and session history.
+Each instance runs independently on its own port with its own workspace and identity.
