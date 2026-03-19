@@ -18,11 +18,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
     exit 1
 fi
 
-# Load compose-level vars from .env.
-# Using set -a / source instead of export $(xargs) to handle paths with spaces.
+# Load compose-level vars from .env and export them for docker compose.
+# Using eval instead of source <(process substitution) which silently fails in some bash contexts.
 set -a
-# shellcheck source=/dev/null
-source <(grep -E '^(BOT_NAME|BOT_PORT|WORKSPACE_PATH)=' "$ENV_FILE")
+eval "$(grep -E '^(BOT_NAME|BOT_PORT|WORKSPACE_PATH)=' "$ENV_FILE")"
 set +a
 
 export BOT_ENV_FILE="$ENV_FILE"
