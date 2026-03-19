@@ -17,7 +17,7 @@ detect_platform() {
     elif grep -qi microsoft /proc/version 2>/dev/null; then
         echo "wsl"
     else
-        fail "Unsupported platform. Supported: macOS, WSL/Linux"
+        fail "Unsupported platform. Supported: macOS, WSL (Windows Subsystem for Linux)"
     fi
 }
 
@@ -35,13 +35,19 @@ else
     if [[ "$PLATFORM" == "wsl" ]]; then
         eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
     else
-        eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv 2>/dev/null)"
+        if [[ -x /opt/homebrew/bin/brew ]]; then
+            eval "$(/opt/homebrew/bin/brew shellenv)"
+        elif [[ -x /usr/local/bin/brew ]]; then
+            eval "$(/usr/local/bin/brew shellenv)"
+        else
+            fail "Homebrew installed but brew binary not found in /opt/homebrew or /usr/local"
+        fi
     fi
     ok "Homebrew"
 fi
 
-# Ensure brew is on PATH for subsequent commands (WSL after fresh install)
-if [[ "$PLATFORM" == "wsl" ]] && [[ -d /home/linuxbrew/.linuxbrew ]]; then
+# Ensure brew is on PATH if it was pre-installed but not in the session environment
+if [[ "$PLATFORM" == "wsl" ]] && [[ -d /home/linuxbrew/.linuxbrew ]] && ! command -v brew &>/dev/null; then
     eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 
@@ -77,13 +83,13 @@ if [[ "$PLATFORM" == "macos" ]]; then
         ok "Docker Desktop (already installed)"
     fi
     # Step B: Start daemon if not running
-    if ! docker info &>/dev/null 2>&1; then
+    if ! docker info &>/dev/null; then
         echo "Starting Docker Desktop..."
         open -a Docker
         echo "Waiting for Docker daemon (this may take ~30 seconds)..."
         timeout=120
         elapsed=0
-        until docker info &>/dev/null 2>&1; do
+        until docker info &>/dev/null; do
             sleep 2
             elapsed=$((elapsed + 2))
             if [[ $elapsed -ge $timeout ]]; then
@@ -101,7 +107,7 @@ else
     else
         ok "docker (already installed)"
     fi
-    if ! docker info &>/dev/null 2>&1; then
+    if ! docker info &>/dev/null; then
         echo ""
         echo "⚠️  Docker daemon not running."
         echo "   On WSL: open Docker Desktop (Windows) → Settings → Resources → WSL Integration"
@@ -127,7 +133,7 @@ brew_install cloudflared
 # ── 7. Docker network (agents-net) ────────────────────────────
 # docker-compose.yml declares agents-net as external: true.
 # Create it if missing so docker compose up doesn't fail silently.
-if ! docker network inspect agents-net &>/dev/null 2>&1; then
+if ! docker network inspect agents-net &>/dev/null; then
     echo "Creating Docker network: agents-net"
     docker network create agents-net
 fi
