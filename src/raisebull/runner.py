@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
 
-ALLOWED_TOOLS = "Read,Write,Edit,Glob,Grep,Bash"
 
 AsyncChunkCallback = Callable[[str], Awaitable[None]]
 
@@ -45,7 +44,7 @@ class ClaudeRunner:
             "-p", prompt,
             "--output-format", "stream-json",
             "--verbose",
-            "--allowedTools", ALLOWED_TOOLS,
+            "--dangerously-skip-permissions",
             "--model", self.model,
         ]
         if self.workspace:
