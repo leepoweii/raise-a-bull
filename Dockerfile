@@ -11,6 +11,7 @@ RUN pip install uv
 
 COPY pyproject.toml README.md ./
 COPY src/ src/
+COPY workspace.example/ /app/workspace.example/
 
 RUN uv sync --no-dev
 

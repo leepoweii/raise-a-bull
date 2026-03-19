@@ -14,4 +14,13 @@ if [ -n "$CLAUDE_CREDENTIALS" ] && [ ! -f "/root/.claude/.credentials.json" ]; t
     echo "Claude credentials written."
 fi
 
+# Seed workspace from example if empty (first deploy on Zeabur)
+if [ -d "/app/workspace.example" ] && [ -z "$(ls -A /app/workspace 2>/dev/null)" ]; then
+    echo "Seeding workspace from workspace.example..."
+    mkdir -p /app/workspace
+    cp -r /app/workspace.example/. /app/workspace/
+    find /app/workspace -name .gitkeep -delete
+    echo "Workspace seeded."
+fi
+
 exec "$@"

@@ -1,0 +1,10 @@
+.git
+workspace
+__pycache__
+*.pyc
+.venv
+.worktrees
+docs
+tests
+*.md
+!README.md
