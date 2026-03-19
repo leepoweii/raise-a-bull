@@ -94,7 +94,13 @@ if [[ "$PLATFORM" == "macos" ]]; then
     ok "Docker"
 else
     # WSL: install docker CLI via brew, daemon comes from Docker Desktop for Windows
-    brew_install docker
+    if ! brew list --formula docker &>/dev/null; then
+        echo "Installing docker (CLI)..."
+        brew install docker
+        ok "docker"
+    else
+        ok "docker (already installed)"
+    fi
     if ! docker info &>/dev/null 2>&1; then
         echo ""
         echo "⚠️  Docker daemon not running."
