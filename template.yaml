@@ -1,0 +1,95 @@
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+    name: raise-a-bull
+spec:
+    description: Personal AI bot for LINE and Discord powered by Claude Max
+    tags:
+        - AI
+        - Bot
+        - LINE
+    readme: |-
+        # raise-a-bull
+
+        Personal AI operating system for LINE and Discord built around Claude Code.
+
+        ## Requirements
+        - Claude Max subscription ($20/mo)
+        - LINE Messaging API channel (free)
+
+        ## Setup
+        1. Get your Claude credentials — run this on your computer:
+           `cat ~/.claude/.credentials.json | base64`
+           (on macOS: `base64 -i ~/.claude/.credentials.json`)
+        2. Fill in LINE channel credentials and paste the base64 credentials below
+        3. Deploy — your bot will be live in ~2 minutes
+        4. Set the webhook URL in LINE Developers Console to:
+           `https://<your-zeabur-domain>/webhook/line` — the domain is shown on your Zeabur service overview page.
+    services:
+        - name: raise-a-bull
+          template: GIT
+          spec:
+            source:
+                githubRepository: leepoweii/raise-a-bull
+            ports:
+                - id: web
+                  port: 8000
+                  type: HTTP
+            volumes:
+                - id: claude-auth
+                  dir: /root/.claude
+                - id: sessions
+                  dir: /app/data
+                - id: workspace
+                  dir: /app/workspace
+            env:
+                CLAUDE_CREDENTIALS:
+                    default: ""
+                    expose: false
+                CLAUDE_MODEL:
+                    default: claude-sonnet-4-6
+                    expose: false
+                LINE_CHANNEL_SECRET:
+                    default: ""
+                    expose: false
+                LINE_CHANNEL_ACCESS_TOKEN:
+                    default: ""
+                    expose: false
+                LINE_USER_ID:
+                    default: ""
+                    expose: false
+                DISCORD_BOT_TOKEN:
+                    default: ""
+                    expose: false
+                DISCORD_GUILD_ID:
+                    default: ""
+                    expose: false
+                DB_PATH:
+                    default: /app/data/sessions.db
+                    expose: false
+                WORKSPACE:
+                    default: /app/workspace
+                    expose: false
+                CLAUDE_BIN:
+                    default: claude
+                    expose: false
+    variables:
+        - key: LINE_CHANNEL_SECRET
+          type: STRING
+          name: LINE Channel Secret
+          description: "LINE Developers Console → Basic Settings → Channel secret"
+        - key: LINE_CHANNEL_ACCESS_TOKEN
+          type: STRING
+          name: LINE Channel Access Token
+          description: "LINE Developers Console → Messaging API → Channel access token"
+        - key: CLAUDE_CREDENTIALS
+          type: STRING
+          name: Claude Credentials (base64)
+          description: "Run: cat ~/.claude/.credentials.json | base64 — Treat like a password, grants full Claude account access"
+        - key: LINE_USER_ID
+          type: STRING
+          name: LINE User ID (optional)
+          description: "Your LINE user ID for proactive messages. Leave blank to disable. Find via: https://manager.line.biz/"
+    localization:
+        zh-TW:
+            description: 基於 Claude Max 的個人 AI 助理，支援 LINE 和 Discord
