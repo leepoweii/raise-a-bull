@@ -11,15 +11,15 @@ raise-a-bull is a **generic engine**. The repo contains no bot-specific content.
 Each bot instance is a **workspace** — a directory with an identity, memory, and skills. One engine, many instances. Like opening different repos in an IDE.
 
 ```
-~/raise-a-bull/          ← engine (this repo, shared)
-~/bots/
-├── work/                ← your work assistant
+~/my-bulls/                ← project root (you name it)
+├── engine/                ← this repo (shared, upgradeable)
+├── work/                  ← your work assistant
 │   ├── .env
 │   └── workspace/
-├── personal/            ← your personal assistant
+├── personal/              ← your personal assistant
 │   ├── .env
 │   └── workspace/
-└── project-x/           ← a bot for a specific project or client
+└── project-x/             ← a bot for a specific project or client
     ├── .env
     └── workspace/
 ```

@@ -1,16 +1,35 @@
 #!/usr/bin/env bash
 # start-bot.sh — Launch a raise-a-bull bot instance
-# Usage: bash start-bot.sh <bot-name>
-# Copy this to ~/bots/start-bot.sh on the host machine (raise_bull.sh does this automatically).
+# Usage: bash start-bot.sh <bot-name> --root=<project-root>
+# Lives in engine/bots/ — no need to copy anywhere.
 set -euo pipefail
 
-BOT="$1"
+BOT="${1:-}"
 if [[ -z "$BOT" ]]; then
-    echo "Usage: $0 <bot-name>"
+    echo "Usage: $0 <bot-name> --root=<project-root>" >&2
     exit 1
 fi
+shift
 
-BOT_DIR="$HOME/bots/$BOT"
+# Parse --root
+PROJECT_ROOT=""
+for arg in "$@"; do
+    case "$arg" in
+        --root=*) PROJECT_ROOT="${arg#--root=}" ;;
+    esac
+done
+
+# Fallback: discover root from script location (engine/bots/start-bot.sh → engine → root)
+if [[ -z "$PROJECT_ROOT" ]]; then
+    PROJECT_ROOT="${RAISE_A_BULL_ROOT:-}"
+fi
+if [[ -z "$PROJECT_ROOT" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+    PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+fi
+
+ENGINE_DIR="$PROJECT_ROOT/engine"
+BOT_DIR="$PROJECT_ROOT/$BOT"
 ENV_FILE="$BOT_DIR/.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -19,14 +38,13 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 # Load compose-level vars from .env and export them for docker compose.
-# Using eval instead of source <(process substitution) which silently fails in some bash contexts.
 set -a
 eval "$(grep -E '^(BOT_NAME|BOT_PORT|WORKSPACE_PATH)=' "$ENV_FILE")"
 set +a
 
 export BOT_ENV_FILE="$ENV_FILE"
 
-cd "$HOME/raise-a-bull"
+cd "$ENGINE_DIR"
 docker compose -p "bull-$BOT" up -d --build
 
 echo "Started bull-$BOT on port $BOT_PORT"

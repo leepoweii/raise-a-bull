@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # raise_bull.sh — Create and start a raise-a-bull bot instance
-# Usage: bash raise_bull.sh <bot-name> [--port=18888] [--domain=DOMAIN] [--discord] [--minimax]
+# Usage: bash raise_bull.sh <bot-name> [--port=18888] [--domain=DOMAIN] [--discord] [--minimax] [--root=PATH]
 set -euo pipefail
 
 # ── Constants ────────────────────────────────────────────────
@@ -10,7 +10,7 @@ DEFAULT_MODEL="claude-sonnet-4-6"
 # ── Parse arguments ──────────────────────────────────────────
 BOT_NAME="${1:-}"
 if [[ -z "$BOT_NAME" ]]; then
-    echo "Usage: raise_bull.sh <bot-name> [--port=PORT] [--domain=DOMAIN] [--discord] [--minimax]" >&2
+    echo "Usage: raise_bull.sh <bot-name> [--port=PORT] [--domain=DOMAIN] [--discord] [--minimax] [--root=PATH]" >&2
     exit 1
 fi
 shift
@@ -19,6 +19,7 @@ PORT=18888
 DOMAIN=""
 ENABLE_DISCORD=false
 ENABLE_MINIMAX=false
+PROJECT_ROOT=""
 
 for arg in "$@"; do
     case "$arg" in
@@ -28,46 +29,56 @@ for arg in "$@"; do
         --domain=*)  DOMAIN="${arg#--domain=}" ;;
         --discord)   ENABLE_DISCORD=true ;;
         --minimax)   ENABLE_MINIMAX=true ;;
+        --root=*)    PROJECT_ROOT="${arg#--root=}" ;;
         *) echo "Unknown flag: $arg" >&2; exit 1 ;;
     esac
 done
+
+# ── Resolve project root ────────────────────────────────────
+# Priority: --root flag > RAISE_A_BULL_ROOT env > prompt via gum
+if [[ -z "$PROJECT_ROOT" ]]; then
+    PROJECT_ROOT="${RAISE_A_BULL_ROOT:-}"
+fi
+
+if [[ -z "$PROJECT_ROOT" ]]; then
+    echo "ERROR: Project root not set. Use --root=PATH or set RAISE_A_BULL_ROOT." >&2
+    exit 1
+fi
+
+# Expand ~ if present
+PROJECT_ROOT="${PROJECT_ROOT/#\~/$HOME}"
+
+ENGINE_DIR="$PROJECT_ROOT/engine"
+BOT_DIR="$PROJECT_ROOT/$BOT_NAME"
+WORKSPACE_DIR="$BOT_DIR/workspace"
+ENV_FILE="$BOT_DIR/.env"
 
 if ! command -v gum &>/dev/null; then
     echo "ERROR: 'gum' is required but not found. Run build_barn.sh first." >&2
     exit 1
 fi
 
-REPO_DIR="$HOME/raise-a-bull"
-BOT_DIR="$HOME/bots/$BOT_NAME"
-WORKSPACE_DIR="$BOT_DIR/workspace"
-ENV_FILE="$BOT_DIR/.env"
-
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "raise_bull.sh — creating bot: $BOT_NAME"
+echo "Project root: $PROJECT_ROOT"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # ── 1. Ensure engine repo is cloned ──────────────────────────
-if [[ ! -d "$REPO_DIR" ]]; then
+mkdir -p "$PROJECT_ROOT"
+if [[ ! -d "$ENGINE_DIR" ]]; then
     echo "Cloning raise-a-bull engine..."
-    git clone https://github.com/leepoweii/raise-a-bull.git "$REPO_DIR"
+    git clone https://github.com/leepoweii/raise-a-bull.git "$ENGINE_DIR"
+else
+    echo "✓ Engine already cloned"
 fi
-
-# Always copy latest helper scripts from repo (ensures fixes propagate)
-mkdir -p "$HOME/bots"
-cp "$REPO_DIR/bots/start-bot.sh" "$HOME/bots/start-bot.sh"
-chmod +x "$HOME/bots/start-bot.sh"
-cp "$REPO_DIR/bots/upgrade_bull.sh" "$HOME/bots/upgrade_bull.sh"
-chmod +x "$HOME/bots/upgrade_bull.sh"
 
 # ── 2. Create bot directories ─────────────────────────────────
 mkdir -p "$WORKSPACE_DIR/data"
 
 # ── 3. Seed workspace (skip if already has content) ───────────
-# Check for any files in workspace/ — don't key on a specific file
-# because the user may have deleted CLAUDE.md but kept their identity files.
 if [[ -z "$(ls -A "$WORKSPACE_DIR" 2>/dev/null)" ]]; then
     echo "Seeding workspace from template..."
-    cp -r "$REPO_DIR/workspace.example/." "$WORKSPACE_DIR/"
+    cp -r "$ENGINE_DIR/workspace.example/." "$WORKSPACE_DIR/"
     echo "✓ Workspace seeded — edit $WORKSPACE_DIR/identity/ to personalize your bot"
 else
     echo "✓ Workspace already has content — skipping seed"
@@ -128,9 +139,6 @@ if [[ "$ENABLE_MINIMAX" == "true" ]]; then
 fi
 
 # ── 6. Write .env (chmod 600) ─────────────────────────────────
-# Non-secret config written via UNQUOTED heredoc (<< ENVEOF, not << 'ENVEOF').
-# Variables like $BOT_NAME and $PORT intentionally expand here — that's the point.
-# Secrets are written via printf to protect against $ in token values (e.g. LINE secrets).
 CLAUDE_MODEL_VALUE="$DEFAULT_MODEL"
 if [[ "$ENABLE_MINIMAX" == "true" ]]; then
     CLAUDE_MODEL_VALUE="$MINIMAX_MODEL"
@@ -139,12 +147,13 @@ fi
 # Create .env with correct permissions atomically before writing any secrets
 install -m 600 /dev/null "$ENV_FILE"
 
-# Start with non-secret config (unquoted heredoc — variables expand intentionally)
+# Non-secret config (unquoted heredoc — variables expand intentionally)
 cat > "$ENV_FILE" << ENVEOF
 # --- Compose-level vars ---
 BOT_NAME="$BOT_NAME"
 BOT_PORT=$PORT
 WORKSPACE_PATH="$WORKSPACE_DIR"
+ENGINE_DIR="$ENGINE_DIR"
 
 # --- Container env vars ---
 CLAUDE_BIN=claude
@@ -179,7 +188,7 @@ echo "✓ .env written (chmod 600)"
 
 # ── 7. Start the bot ──────────────────────────────────────────
 echo "Starting $BOT_NAME..."
-bash "$HOME/bots/start-bot.sh" "$BOT_NAME"
+bash "$ENGINE_DIR/bots/start-bot.sh" "$BOT_NAME" --root="$PROJECT_ROOT"
 
 # ── 8. Wait for /health ───────────────────────────────────────
 echo "Waiting for bot to be healthy..."
