@@ -58,6 +58,10 @@ if [[ ! -f "$HOME/bots/start-bot.sh" ]]; then
     cp "$REPO_DIR/bots/start-bot.sh" "$HOME/bots/start-bot.sh"
     chmod +x "$HOME/bots/start-bot.sh"
 fi
+if [[ ! -f "$HOME/bots/upgrade_bull.sh" ]]; then
+    cp "$REPO_DIR/bots/upgrade_bull.sh" "$HOME/bots/upgrade_bull.sh"
+    chmod +x "$HOME/bots/upgrade_bull.sh"
+fi
 
 # ── 2. Create bot directories ─────────────────────────────────
 mkdir -p "$WORKSPACE_DIR/data"
