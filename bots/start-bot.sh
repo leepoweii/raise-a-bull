@@ -19,6 +19,9 @@ for arg in "$@"; do
     esac
 done
 
+# Expand ~ to $HOME (tilde doesn't expand inside variables)
+PROJECT_ROOT="${PROJECT_ROOT/#\~/$HOME}"
+
 # Fallback: discover root from script location (engine/bots/start-bot.sh → engine → root)
 if [[ -z "$PROJECT_ROOT" ]]; then
     PROJECT_ROOT="${RAISE_A_BULL_ROOT:-}"
