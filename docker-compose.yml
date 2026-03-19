@@ -1,15 +1,15 @@
 services:
-  daniu:
+  bot:
     build: .
-    container_name: bull-daniu
+    image: raise-a-bull:latest
+    container_name: bull-${BOT_NAME}
     restart: unless-stopped
     ports:
-      - "18888:8000"
-    env_file: .env
+      - "${BOT_PORT}:8000"
+    env_file: ${BOT_ENV_FILE}
     volumes:
-      - ./workspace:/app/workspace
-      - daniu-data:/app/data
-      - daniu-claude:/home/bull/.claude
+      - ${WORKSPACE_PATH}:/app/workspace
+      - bot-claude:/home/bull/.claude
     networks:
       - default
       - agents-net
@@ -20,8 +20,7 @@ services:
       retries: 3
 
 volumes:
-  daniu-data:
-  daniu-claude:
+  bot-claude:
 
 networks:
   agents-net:

@@ -1,7 +1,7 @@
 """Session store for Samantha v2.
 
 Tracks claude -p session IDs per Discord channel or LINE user.
-Key format: discord:{channel_id} or line:{user_id}
+Key format: discord:{channel_id}, line:{user_id}, or line:group:{group_id}
 """
 from __future__ import annotations
 

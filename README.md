@@ -1,108 +1,190 @@
 # raise-a-bull
 
-An open-source personal AI operating system built around Claude Code. You deploy it once — your bot (Callie / 小牛) lives in LINE and Discord, knows your context, and remembers things across conversations. You own everything: the compute, the data, the personality.
+A personal AI bot engine built on Claude Code. Deploy once — your bot lives in LINE and Discord, knows your context, and remembers things across conversations. You own everything: the compute, the data, the personality.
 
 ---
 
-## Deploy to Zeabur
+## What it is
 
-[![Deploy to Zeabur](https://zeabur.com/button.svg)](https://zeabur.com/new?template=PLACEHOLDER_TEMPLATE_ID)
+raise-a-bull is a **generic engine**. The repo contains no bot-specific content.
 
-> **Note for maintainer:** Replace `PLACEHOLDER_TEMPLATE_ID` with the actual ID after running:
-> ```bash
-> npx zeabur@latest template create -f template.yaml
-> ```
+Each bot instance is a **workspace** — a directory with an identity, memory, and skills. One engine, many instances. Like opening different repos in an IDE.
+
+```
+~/raise-a-bull/          ← engine (this repo, shared)
+~/bots/
+├── work/                ← your work assistant
+│   ├── .env
+│   └── workspace/
+├── personal/            ← your personal assistant
+│   ├── .env
+│   └── workspace/
+└── project-x/           ← a bot for a specific project or client
+    ├── .env
+    └── workspace/
+```
+
+Each workspace is self-contained:
+
+```
+workspace/
+├── CLAUDE.md            ← entry point (@includes identity/)
+├── identity/
+│   ├── profile.md       ← who the bot is, personality, tone
+│   ├── context.md       ← background about you and your work
+│   └── expertise.md     ← what this instance specializes in
+├── memory/              ← persistent memory (written by Claude)
+├── skills/              ← loadable skill documents
+└── data/
+    └── sessions.db      ← conversation session cache
+```
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
 
 ---
 
 ## Requirements
 
-- **Claude Max** (~$20/mo) — required. raise-a-bull runs `claude -p` under the hood; no Claude Max, no bot.
-- **LINE Messaging API** account — free tier is enough
-- **Discord** account + bot token — free
-- **A machine to run it on** — Mac Mini, always-on Linux box, or Zeabur (see below)
-
-**Cost estimate:** Claude Max $20/mo + optional Zeabur ~$5/mo. That's it.
+- **Claude Max** (~$20/mo) — or a MiniMax API key (see below)
+- **LINE Messaging API** account — free tier
+- **Discord** account + bot token — optional, free
+- **A Linux machine** — Mac Mini, always-on server, or Zeabur
 
 ---
 
 ## Quick Start
 
-### Option A — Let Claude guide you (recommended)
-
-Paste the contents of [](docs/install-guide-for-claude.md) into a Claude conversation. Claude will walk you through the entire setup interactively — checking prerequisites, guiding you through LINE and Discord consoles, and verifying everything works.
-
-
-
-### Option B — Zeabur (recommended for non-developers)
-
-1. Click **Deploy to Zeabur** *(button coming soon)*
-2. Fill in your environment variables (see `.env.example`)
-3. Add your bot on LINE — say hi
-
-### Option C — Local machine (manual)
+### Step 1 — Clone the engine
 
 ```bash
-# 1. Clone
-git clone https://github.com/yourname/raise-a-bull
-cd raise-a-bull
-
-# 2. Copy and fill in your keys
-cp .env.example .env
-$EDITOR .env
-
-# 3. Copy the workspace template
-cp -r workspace.example workspace
-
-# 4. Start
-docker compose up -d
-
-# 5. Expose webhook (Cloudflare tunnel recommended)
-cloudflared tunnel --url http://localhost:8000
+git clone https://github.com/yourname/raise-a-bull.git
 ```
 
-Set the printed URL as your LINE webhook: `https://<your-tunnel>/webhook/line`
+### Step 2 — Create your first bot instance
+
+```bash
+# Create instance directory
+mkdir -p ~/bots/mybot
+
+# Copy the env template
+cp ~/raise-a-bull/.env.example ~/bots/mybot/.env
+
+# Seed the workspace
+cp -r ~/raise-a-bull/workspace.example/. ~/bots/mybot/workspace/
+```
+
+### Step 3 — Fill in your identity
+
+Edit `~/bots/mybot/workspace/identity/profile.md` — give your bot a name and personality.  
+Edit `~/bots/mybot/workspace/identity/context.md` — tell it about you.
+
+This is the only content you need to touch.
+
+### Step 4 — Configure secrets
+
+Edit `~/bots/mybot/.env`:
+
+```env
+# Compose vars
+BOT_NAME=mybot
+BOT_PORT=18888
+WORKSPACE_PATH=/home/yourname/bots/mybot/workspace
+
+# Container vars
+CLAUDE_BIN=claude
+CLAUDE_MODEL=claude-sonnet-4-6
+WORKSPACE=/app/workspace
+DB_PATH=/app/workspace/data/sessions.db
+
+# LINE
+LINE_CHANNEL_ACCESS_TOKEN=...
+LINE_CHANNEL_SECRET=...
+LINE_USER_ID=...
+
+# Discord (optional)
+DISCORD_BOT_TOKEN=
+DISCORD_GUILD_ID=
+
+# Claude auth (base64 of ~/.claude/.credentials.json)
+CLAUDE_CREDENTIALS=...
+```
+
+For a guided walkthrough of LINE and Discord setup, paste [docs/install-guide-for-claude.md](docs/install-guide-for-claude.md) into a Claude conversation.
+
+### Step 5 — Copy the launch helper
+
+```bash
+cp ~/raise-a-bull/bots/start-bot.sh ~/bots/start-bot.sh
+chmod +x ~/bots/start-bot.sh
+```
+
+### Step 6 — Start
+
+```bash
+cd ~/bots && bash start-bot.sh mybot
+curl http://localhost:18888/health
+# {"status":"ok","version":"0.1.0"}
+```
+
+### Step 7 — Expose webhook
+
+```bash
+cloudflared tunnel --url http://localhost:18888
+```
+
+Set the printed URL as your LINE webhook: `https://<tunnel>/webhook/line`
 
 ---
 
-## Personalizing your bot
+## Optional: Use MiniMax instead of Claude subscription
 
-Everything about your bot's personality lives in `workspace/CLAUDE.md`. Open it and edit freely:
+Set two extra vars in your `.env` to use MiniMax M2.7 (~$0.30/$1.20 per M tokens) instead of Claude Max:
 
-```markdown
-# Callie / 小牛 — Personality & Instructions
-
-You are Callie (小牛), a personal AI assistant.
-...
+```env
+MINIMAX_API_KEY=sk-api-...
+CLAUDE_MODEL=MiniMax-M2.7
 ```
 
-**Want to rename your bot?** Just change the name in `workspace/CLAUDE.md`. The framework doesn't care what you call her.
+The engine writes the necessary config automatically on startup. Get a key at https://platform.minimax.io
 
-**Want to add skills?** Drop Markdown files into `workspace/skills/`. Claude reads them on every message.
+---
 
-**Want persistent memory?** Write to `workspace/memory/`. Claude reads it too.
+## Adding more instances
+
+```bash
+mkdir -p ~/bots/work
+cp ~/raise-a-bull/.env.example ~/bots/work/.env
+cp -r ~/raise-a-bull/workspace.example/. ~/bots/work/workspace/
+# edit .env (different BOT_NAME and BOT_PORT)
+# edit workspace/identity/
+bash ~/bots/start-bot.sh work
+```
+
+Each instance gets its own port, its own identity, its own memory, and its own session history.
 
 ---
 
 ## Environment variables
 
-See `.env.example` for the full list. The essentials:
-
 | Variable | Required | Description |
 |----------|----------|-------------|
+| `BOT_NAME` | ✅ | Container name suffix (`bull-{BOT_NAME}`) |
+| `BOT_PORT` | ✅ | Host port to expose (e.g. `18888`) |
+| `WORKSPACE_PATH` | ✅ | Absolute host path to `workspace/` |
 | `LINE_CHANNEL_ACCESS_TOKEN` | ✅ | From LINE Developers console |
 | `LINE_CHANNEL_SECRET` | ✅ | From LINE Developers console |
-| `DISCORD_BOT_TOKEN` | optional | Skip if you only want LINE |
+| `CLAUDE_CREDENTIALS` | ✅ | base64 of `~/.claude/.credentials.json` |
+| `DISCORD_BOT_TOKEN` | optional | Skip if LINE only |
 | `DISCORD_GUILD_ID` | optional | Your Discord server ID |
-| `WORKSPACE` | ✅ | Absolute path to your `workspace/` dir |
-| `CLAUDE_BIN` | optional | Path to `claude` binary (default: `claude`) |
+| `MINIMAX_API_KEY` | optional | Use MiniMax instead of Claude subscription |
+| `CLAUDE_MODEL` | optional | Model name (default: `claude-sonnet-4-6`) |
 
 ---
 
 ## Health check
 
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:18888/health
 # {"status":"ok","version":"0.1.0"}
 ```
 
@@ -112,5 +194,5 @@ curl http://localhost:8000/health
 
 - ❌ Not a hosted service — you own your data and compute
 - ❌ Not model-agnostic — Claude Code only, by design
-- ❌ Not a no-code tool — you edit `CLAUDE.md`, that's the minimum
+- ❌ Not a no-code tool — you edit `identity/`, that's the minimum
 - ❌ Not a replacement for Claude.ai — it's a bot layer, not a chat UI
