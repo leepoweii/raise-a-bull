@@ -19,8 +19,13 @@ RUN uv sync --no-dev
 
 RUN mkdir -p /app/data /app/workspace
 
+# Non-root user required for --dangerously-skip-permissions
+RUN useradd -m -u 1000 bull &&     mkdir -p /home/bull/.claude &&     chown -R bull:bull /app /home/bull
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
+
+USER bull
 
 EXPOSE 8000
 

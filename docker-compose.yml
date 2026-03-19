@@ -9,7 +9,7 @@ services:
     volumes:
       - ./workspace:/app/workspace
       - daniu-data:/app/data
-      - daniu-claude:/root/.claude
+      - daniu-claude:/home/bull/.claude
     networks:
       - default
       - agents-net
