@@ -11,3 +11,4 @@ workspace/
 *.db
 *.sqlite
 .DS_Store
+.env.bak
