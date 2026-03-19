@@ -14,6 +14,11 @@ if [ -n "$CLAUDE_CREDENTIALS" ] && [ ! -f "/root/.claude/.credentials.json" ]; t
     echo "Claude credentials written."
 fi
 
+# Enforce correct permissions on credentials file (every startup)
+if [ -f /root/.claude/.credentials.json ]; then
+    chmod 600 /root/.claude/.credentials.json 2>/dev/null || true
+fi
+
 # Seed workspace from example if empty (first deploy on Zeabur)
 if [ -d "/app/workspace.example" ] && [ -z "$(ls -A /app/workspace 2>/dev/null)" ]; then
     echo "Seeding workspace from workspace.example..."
