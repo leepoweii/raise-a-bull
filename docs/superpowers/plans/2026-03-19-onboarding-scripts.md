@@ -17,6 +17,7 @@
 | `build_barn.sh` | Create | Idempotent dependency installer; Homebrew-first on macOS + WSL |
 | `raise_bull.sh` | Create | Bot instance creator: dirs, .env, gum secrets, start container |
 | `bots/start-bot.sh` | Add to repo | Launch helper (exists on samantha-wsl, not committed yet) |
+| `bots/upgrade_bull.sh` | Create | Engine upgrade script: `git pull` + restart, context untouched |
 | `docs/install-guide-for-claude.md` | Rewrite | Claude Code starter prompt — orchestrates full onboarding |
 | `docs/screenshots/.gitkeep` | Create | Placeholder directory for future screenshot guides |
 
@@ -151,10 +152,10 @@ brew_install node
 # ── 4. gum ───────────────────────────────────────────────────
 brew_install gum
 
-# ── 5. gh (GitHub CLI, optional) ──────────────────────────────
+# ── 5. gh (GitHub CLI) ──────────────────────────────
 brew_install gh
 
-# ── 6. cloudflared (optional) ─────────────────────────────────
+# ── 6. cloudflared) ─────────────────────────────────
 brew_install cloudflared
 
 # ── 7. Docker network (agents-net) ────────────────────────────
@@ -505,14 +506,17 @@ git commit -m "feat: add raise_bull.sh — bot instance creator with gum-secured
 
 ---
 
-## Task 3: Add `bots/start-bot.sh` to repo
+## Task 3: Add `bots/start-bot.sh` and `bots/upgrade_bull.sh` to repo
 
 **Files:**
 - Create: `bots/start-bot.sh`
+- Create: `bots/upgrade_bull.sh`
 
-Context: This file exists on samantha-wsl at `~/bots/start-bot.sh` but was never committed to the repo. It needs to live at `bots/start-bot.sh` in the repo so `raise_bull.sh` can copy it during setup. **Do not confuse paths**: `bots/start-bot.sh` is in the repo; `~/bots/start-bot.sh` is where it lives on the user's machine.
+Context: These files exist on samantha-wsl at `~/bots/` but were never committed to the repo. They live at `bots/` in the repo so `raise_bull.sh` can copy them during setup. **Do not confuse paths**: `bots/start-bot.sh` is in the repo; `~/bots/start-bot.sh` is where it lives on the user's machine.
 
 Fix from review: replace `export $(grep ... | xargs)` with `set -a; source` to handle paths with spaces correctly.
+
+**Upgrade story:** Because the engine (`~/raise-a-bull/`) and context (`~/bots/<name>/workspace/`) are fully separated, upgrades are clean — `git pull` updates the engine code, restart rebuilds the Docker image, context is never touched. `upgrade_bull.sh` packages this into one command for non-technical users.
 
 - [ ] **Step 1: Create `bots/start-bot.sh` in the repo**
 
@@ -556,17 +560,83 @@ SCRIPT
 chmod +x bots/start-bot.sh
 ```
 
-- [ ] **Step 2: Verify syntax**
+- [ ] **Step 2: Create `bots/upgrade_bull.sh` in the repo**
 
 ```bash
-bash -n bots/start-bot.sh && echo "✓ Syntax OK"
+cat > bots/upgrade_bull.sh << 'SCRIPT'
+#!/usr/bin/env bash
+# upgrade_bull.sh — Upgrade raise-a-bull engine and restart a bot instance
+# Usage: bash upgrade_bull.sh <bot-name>
+# Copy this to ~/bots/upgrade_bull.sh on the host machine.
+#
+# What it does:
+#   1. git pull in ~/raise-a-bull/ (engine only — your workspace/identity/memory are untouched)
+#   2. Restart the bot container (rebuilds Docker image from updated code)
+set -euo pipefail
+
+BOT="${1:-}"
+if [[ -z "$BOT" ]]; then
+    echo "Usage: $0 <bot-name>"
+    exit 1
+fi
+
+REPO_DIR="$HOME/raise-a-bull"
+
+if [[ ! -d "$REPO_DIR" ]]; then
+    echo "ERROR: $REPO_DIR not found. Run raise_bull.sh first." >&2
+    exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Upgrading raise-a-bull engine..."
+echo "(Your workspace, identity, memory, and sessions are untouched)"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+cd "$REPO_DIR"
+git pull origin main
+
+echo ""
+echo "Restarting bull-$BOT..."
+bash "$HOME/bots/start-bot.sh" "$BOT"
+
+echo ""
+echo "✓ bull-$BOT upgraded and restarted"
+SCRIPT
+chmod +x bots/upgrade_bull.sh
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Verify syntax**
 
 ```bash
-git add bots/start-bot.sh
-git commit -m "feat: add bots/start-bot.sh to repo (was only on host machine)"
+bash -n bots/start-bot.sh    && echo "✓ start-bot.sh syntax OK"
+bash -n bots/upgrade_bull.sh && echo "✓ upgrade_bull.sh syntax OK"
+```
+
+- [ ] **Step 4: Update `raise_bull.sh` to also copy `upgrade_bull.sh`**
+
+In `raise_bull.sh`, find the block that copies `start-bot.sh` and add the upgrade script alongside it:
+
+```bash
+# In raise_bull.sh — replace the start-bot.sh copy block with:
+if [[ ! -f "$HOME/bots/start-bot.sh" ]]; then
+    mkdir -p "$HOME/bots"
+    cp "$REPO_DIR/bots/start-bot.sh" "$HOME/bots/start-bot.sh"
+    chmod +x "$HOME/bots/start-bot.sh"
+fi
+if [[ ! -f "$HOME/bots/upgrade_bull.sh" ]]; then
+    cp "$REPO_DIR/bots/upgrade_bull.sh" "$HOME/bots/upgrade_bull.sh"
+    chmod +x "$HOME/bots/upgrade_bull.sh"
+fi
+```
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add bots/start-bot.sh bots/upgrade_bull.sh
+git commit -m "feat: add bots/start-bot.sh and upgrade_bull.sh to repo
+
+upgrade_bull.sh: git pull engine + restart bot in one command.
+Context (workspace, identity, memory, sessions.db) is never touched."
 ```
 
 ---
@@ -949,10 +1019,11 @@ git commit -m "docs: update Quick Start — Claude Code as entry point, correct 
 - [ ] **Step 1: Check all files exist and are syntactically valid**
 
 ```bash
-ls -la build_barn.sh raise_bull.sh bots/start-bot.sh
-bash -n build_barn.sh      && echo "✓ build_barn.sh syntax"
-bash -n raise_bull.sh      && echo "✓ raise_bull.sh syntax"
-bash -n bots/start-bot.sh  && echo "✓ start-bot.sh syntax"
+ls -la build_barn.sh raise_bull.sh bots/start-bot.sh bots/upgrade_bull.sh
+bash -n build_barn.sh         && echo "✓ build_barn.sh syntax"
+bash -n raise_bull.sh         && echo "✓ raise_bull.sh syntax"
+bash -n bots/start-bot.sh     && echo "✓ start-bot.sh syntax"
+bash -n bots/upgrade_bull.sh  && echo "✓ upgrade_bull.sh syntax"
 ls docs/screenshots/       && echo "✓ screenshots dir"
 wc -l docs/install-guide-for-claude.md
 ```
