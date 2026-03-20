@@ -150,7 +150,7 @@ let tunnelProcess: ReturnType<typeof Bun.spawn> | null = null
 
 export async function startTunnel(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const proc = Bun.spawn(['cloudflared', 'tunnel', '--url', `http://localhost:${port}`], {
+    const proc = Bun.spawn(['cloudflared', 'tunnel', '--config', '/dev/null', '--url', `http://localhost:${port}`], {
       stderr: 'pipe',
     })
     tunnelProcess = proc
