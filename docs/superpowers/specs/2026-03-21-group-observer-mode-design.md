@@ -68,7 +68,8 @@ class MessageBuffer {
 - One buffer per group, keyed by `groupId`.
 - `cleanup()` runs on the existing 30-second interval (shared with token cache cleanup).
 - `cleanup()` is **synchronous** — it iterates the buffer map, partitions expired messages by group, and returns the result in one synchronous step. The caller (`server.ts`) then sends MCP notifications asynchronously. If a trigger arrives between cleanup's return and the async notification send, the trigger finds an empty buffer — this is acceptable since the auto-flush notification already captured the context.
-- `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the current `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller can send MCP notifications.
+- The cleanup interval calls `reloadAccess()` before invoking `cleanup()`, ensuring the `getAutoFlush` callback always reads fresh config from disk. This prevents stale-config bugs where a group switched from `forward` to `discard` still gets its messages forwarded.
+- `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the freshly-loaded `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller can send MCP notifications.
 - **Max buffer size:** 200 messages per group. When the cap is hit, behavior follows the group's `autoFlush` setting: `'forward'` (default) flushes all 200 as an auto-flush notification and continues buffering fresh messages; `'discard'` drops the oldest message to make room. Note: if a trigger arrives right after a cap-hit flush, the buffer is empty and the trigger is sent with no context block — this is acceptable since the auto-flush already delivered those messages.
 - **Display names** are resolved at push time (in `handleInbound`, before buffering) since the user context is available then. Uses the existing `getProfile()` API which may fail for group members who haven't added the bot as a friend — in that case, the userId is used as fallback (e.g., `[14:01] U1234abc...: hello`). This is the same limitation as the current filtered mode.
 
@@ -116,8 +117,9 @@ class MessageBuffer {
 
 - `auto_flushed="true"` tells Claude this is background context, not a request.
 - The security suffix explicitly instructs Claude not to respond — auto-flush is passive context, not an action item.
-- MCP notification meta: `{ chat_id, ts: <flush_time_iso>, message_type: "observer_auto_flush" }`. No `user`, `user_id`, `message_id`, or `reply_to` (there is no single sender or triggering message).
+- MCP notification meta: `{ chat_id, message_id: "auto_flush_<groupId>_<timestamp>", ts: <flush_time_iso>, message_type: "observer_auto_flush" }`. No `user`, `user_id`, or `reply_to` (there is no single sender or triggering message). The synthetic `message_id` ensures that if Claude mistakenly calls the `reply` tool, it will find no cached reply token and gracefully fall back to `pushMessage`.
 - Same format is used for both TTL-expiry and cap-hit auto-flush.
+- Both cap-hit flush and TTL cleanup are synchronous operations on the same in-memory array. Since Bun is single-threaded, they cannot interleave — no concurrency issue between them.
 
 **Non-text messages in buffer:** Buffered messages use the same `formatInboundContent()` output already used for filtered mode (e.g., `(sticker: ...)`, `(image: ...)`). No special handling needed.
 
@@ -201,7 +203,7 @@ else → drop (filtered mode)
 - Auto-flush discard: same setup, verify no notification callback and empty buffer.
 - Filtered mode unchanged: verify non-mention messages are dropped (no buffer) and mentions fire immediately.
 
-**Test plumbing:** Uses `startHttpServer` with real HTTP requests and a real `MessageBuffer`. The `handleInbound` function (which contains the observer logic) is extracted from `main()` to be independently testable — it takes dependencies (`lineClient`, `messageBuffer`, `access`, `notifyFn`) as parameters. Tests provide a mock `notifyFn` callback to capture notifications and a stubbed `lineClient` (since we can't hit LINE's real API). The `access` config and `messageBuffer` are real instances.
+**Test plumbing:** Uses `startHttpServer` with real HTTP requests and a real `MessageBuffer`. The `handleInbound` function (which contains the observer logic) is extracted from `main()` into a factory or standalone function. It takes all closure dependencies as parameters: `{ lineClient, messageBuffer, access (getter), notifyFn, botUserId, profileCache }`. Tests provide a mock `notifyFn` callback to capture notifications and a stubbed `lineClient` (since we can't hit LINE's real API). The `access` config, `messageBuffer`, and `profileCache` are real instances.
 
 ## Files Changed
 
