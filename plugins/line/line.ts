@@ -217,7 +217,7 @@ export function startHttpServer(
                   && (msgEvent.message as any).mention?.mentionees
                   ? (msgEvent.message as any).mention.mentionees.map((m: any) => m.userId).filter(Boolean)
                   : undefined
-                callbacks.onMessage({
+                Promise.resolve(callbacks.onMessage({
                   chatId: ids.chatId,
                   messageId: msgEvent.message.id,
                   userId: ids.userId,
@@ -226,7 +226,7 @@ export function startHttpServer(
                   replyToken: event.replyToken,
                   timestamp: new Date(event.timestamp).toISOString(),
                   mentionedUserIds,
-                })
+                })).catch((err) => console.error('[line] Error handling message:', err))
                 break
               }
               case 'follow':
