@@ -67,7 +67,8 @@ bun --version
   "version": "0.1.0",
   "description": "LINE Messaging API channel plugin for Claude Code",
   "scripts": {
-    "start": "bun install --no-summary && bun server.ts",
+    "start": "bun server.ts",
+    "setup": "bun install --no-summary",
     "test": "bun test"
   },
   "dependencies": {
@@ -118,7 +119,7 @@ bun --version
 {
   "line": {
     "command": "bun",
-    "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "--shell=bun", "--silent", "start"]
+    "args": ["run", "--cwd", "${CLAUDE_PLUGIN_ROOT}", "--silent", "start"]
   }
 }
 ```
@@ -930,7 +931,6 @@ Create `line.ts` with the full LINE adapter. Key sections:
 
 ```typescript
 // line.ts
-import { Subprocess } from 'bun'
 import { validateSignature, messagingApi, type WebhookEvent, type MessageEvent } from '@line/bot-sdk'
 import { TokenCache } from './token-cache'
 import { chunkMessage } from './chunking'
@@ -960,7 +960,7 @@ export interface InboundMessage {
 }
 
 export interface LineCallbacks {
-  onMessage: (msg: InboundMessage) => void
+  onMessage: (msg: InboundMessage) => void | Promise<void>
   onFollow: (userId: string) => void
   onJoin: (groupId: string) => void
   onLeave: (groupId: string) => void
@@ -981,11 +981,13 @@ export function formatInboundContent(event: MessageEvent): string {
       return `(sticker: package=${msg.packageId}, id=${msg.stickerId})`
     case 'location':
       return `(location: ${msg.title || ''} ${msg.address || ''} [${msg.latitude}, ${msg.longitude}])`
-    case 'image':
-      if (msg.contentProvider.type === 'external') {
-        return `(image: ${msg.contentProvider.originalContentUrl})`
+    case 'image': {
+      const provider = msg.contentProvider
+      if (provider.type === 'external') {
+        return `(image: ${(provider as { originalContentUrl: string }).originalContentUrl})`
       }
       return `(image: pending download, message_id=${msg.id})`
+    }
     default:
       return `(${msg.type} message)`
   }
@@ -1034,6 +1036,11 @@ export class LineClient {
     await this.client.pushMessage({ to: chatId, messages })
   }
 
+  async getBotInfo(): Promise<{ userId: string; displayName: string }> {
+    const info = await this.client.getBotInfo()
+    return { userId: info.userId, displayName: info.displayName }
+  }
+
   async getProfile(userId: string): Promise<{ displayName: string; pictureUrl?: string }> {
     const profile = await this.client.getProfile(userId)
     return { displayName: profile.displayName, pictureUrl: profile.pictureUrl }
@@ -1053,7 +1060,7 @@ export class LineClient {
   }
 
   async downloadImage(messageId: string, inboxDir: string): Promise<string> {
-    const { mkdirSync, writeFileSync } = await import('fs')
+    const { mkdirSync } = await import('fs')
     mkdirSync(inboxDir, { recursive: true })
     const stream = await this.blobClient.getMessageContent(messageId)
     const path = `${inboxDir}/${messageId}.jpg`
@@ -1062,7 +1069,7 @@ export class LineClient {
     for await (const chunk of stream as any) {
       chunks.push(Buffer.from(chunk))
     }
-    writeFileSync(path, Buffer.concat(chunks))
+    await Bun.write(path, Buffer.concat(chunks))
     return path
   }
 
@@ -1091,7 +1098,7 @@ export function extractIds(event: WebhookEvent): { chatId: string; userId: strin
 
 // --- Auto-Tunnel ---
 
-let tunnelProcess: Subprocess | null = null
+let tunnelProcess: ReturnType<typeof Bun.spawn> | null = null
 
 export async function startTunnel(port: number): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -1243,6 +1250,7 @@ This is the main entry point. Connects MCP to Claude Code via stdio, registers t
 // server.ts
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { homedir } from 'os'
 import { join } from 'path'
 import { existsSync, mkdirSync, readFileSync } from 'fs'
@@ -1287,7 +1295,7 @@ function loadEnv(): { secret: string; token: string } | null {
   const vars: Record<string, string> = {}
   for (const line of content.split('\n')) {
     const match = line.match(/^(\w+)=(.*)$/)
-    if (match) vars[match[1]] = match[2]
+    if (match) vars[match[1]] = match[2].replace(/^["']|["']$/g, '') // strip surrounding quotes
   }
   if (vars.LINE_CHANNEL_SECRET && vars.LINE_CHANNEL_ACCESS_TOKEN) {
     return { secret: vars.LINE_CHANNEL_SECRET, token: vars.LINE_CHANNEL_ACCESS_TOKEN }
@@ -1348,8 +1356,26 @@ async function main() {
   // Periodic token cleanup
   setInterval(() => lineClient.cleanupTokens(), 30_000)
 
-  // Profile display name cache (userId → displayName)
-  const profileCache = new Map<string, string>()
+  // Profile display name cache (userId → { name, fetchedAt })
+  // TTL: 1 hour, max 1000 entries
+  const profileCache = new Map<string, { name: string; fetchedAt: number }>()
+  function getCachedProfile(userId: string): string | undefined {
+    const entry = profileCache.get(userId)
+    if (!entry) return undefined
+    if (Date.now() - entry.fetchedAt > 3600_000) {
+      profileCache.delete(userId)
+      return undefined
+    }
+    return entry.name
+  }
+  function setCachedProfile(userId: string, name: string): void {
+    if (profileCache.size >= 1000) {
+      // Evict oldest
+      const oldest = profileCache.keys().next().value
+      if (oldest) profileCache.delete(oldest)
+    }
+    profileCache.set(userId, { name, fetchedAt: Date.now() })
+  }
 
   // --- Access Control ---
 
@@ -1366,7 +1392,7 @@ async function main() {
 
   // --- Tool Registration ---
 
-  mcp.setRequestHandler({ method: 'tools/list' } as any, async () => ({
+  mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: [
       {
         name: 'reply',
@@ -1407,7 +1433,7 @@ async function main() {
     ],
   }))
 
-  mcp.setRequestHandler({ method: 'tools/call' } as any, async (request: any) => {
+  mcp.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params
     reloadAccess()
 
@@ -1438,9 +1464,23 @@ async function main() {
     }
   })
 
+  // --- Fetch bot's own user ID at startup (for mention detection in groups) ---
+
+  let botUserId = process.env.LINE_BOT_USER_ID || ''
+  if (!botUserId) {
+    try {
+      const botInfo = await lineClient.getBotInfo()
+      botUserId = botInfo.userId
+      console.error(`[line] Bot user ID: ${botUserId}`)
+    } catch {
+      console.error('[line] WARNING: Could not fetch bot info. Group @mention detection will not work.')
+      console.error('[line] Set LINE_BOT_USER_ID in .env as fallback.')
+    }
+  }
+
   // --- Inbound Message Handler ---
 
-  function handleInbound(msg: InboundMessage): void {
+  async function handleInbound(msg: InboundMessage): Promise<void> {
     reloadAccess()
     const isGroup = msg.chatId !== msg.userId
 
@@ -1457,8 +1497,8 @@ async function main() {
       // Check group filter
       // LINE provides mention data in message.mention.mentionees[] for text messages
       // Each mentionee has a userId — check if the bot's userId is mentioned
-      const isMention = msg.messageType === 'text' && msg.mentionedUserIds
-        ? msg.mentionedUserIds.includes(process.env.LINE_BOT_USER_ID || '')
+      const isMention = botUserId && msg.messageType === 'text' && msg.mentionedUserIds
+        ? msg.mentionedUserIds.includes(botUserId)
         : false
       const filter = shouldForwardGroupMessage(access, msg.chatId, msg.text, isMention)
       if (!filter.forward) return
@@ -1489,13 +1529,13 @@ async function main() {
       lineClient.cacheReplyToken(msg.messageId, msg.chatId, msg.replyToken)
     }
 
-    // Resolve display name (cached to avoid API calls on every message)
-    let displayName = profileCache.get(msg.userId)
+    // Resolve display name (cached with TTL to avoid API calls on every message)
+    let displayName = getCachedProfile(msg.userId)
     if (!displayName) {
       try {
         const profile = await lineClient.getProfile(msg.userId)
         displayName = profile.displayName
-        profileCache.set(msg.userId, displayName)
+        setCachedProfile(msg.userId, displayName)
       } catch {
         displayName = msg.userId // Fallback to raw ID
       }

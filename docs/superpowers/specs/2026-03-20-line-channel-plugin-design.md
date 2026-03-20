@@ -406,7 +406,7 @@ This is a future enhancement, not in v1.
 
 - **Single session** — all chats share one Claude Code context
 - **Text-only outbound** — replies are text only, no Flex/template/image
-- **Quick tunnel only by default** — URL changes on restart (auto-updated via API)
+- **Quick tunnel only by default** — URL changes on restart (auto-updated via API). No auto-recovery if cloudflared dies mid-session — requires plugin restart.
 - **No `fetch_messages`** — LINE API doesn't support it
 - **cloudflared required** — must be pre-installed for default tunnel flow
 - **No heartbeat** — future agents-infra service, separate from this plugin
