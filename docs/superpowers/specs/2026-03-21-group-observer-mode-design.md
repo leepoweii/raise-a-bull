@@ -31,12 +31,12 @@ export interface GroupConfig {
   requireMention: boolean
   triggerPrefix?: string
   mode?: 'filtered' | 'observer'     // default: 'filtered'
-  autoFlush?: 'discard' | 'forward'  // default: 'discard'
+  autoFlush?: 'discard' | 'forward'  // default: 'forward'
 }
 ```
 
 - `mode` controls whether non-triggered messages are dropped or buffered.
-- `autoFlush` controls what happens when buffered messages expire (60-min TTL) without a trigger. Configurable per-group.
+- `autoFlush` controls what happens when buffered messages expire (60-min TTL) without a trigger. Defaults to `'forward'` so Claude always gets context. Configurable per-group.
 
 ### 3. Message Buffer
 
@@ -68,12 +68,12 @@ class MessageBuffer {
 - One buffer per group, keyed by `groupId`.
 - `cleanup()` runs on the existing 30-second interval (shared with token cache cleanup).
 - `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the current `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller (`server.ts`) can send MCP notifications.
-- **Max buffer size:** 200 messages per group. When exceeded, oldest messages are dropped. This prevents unbounded growth from spam or very active groups.
+- **Max buffer size:** 200 messages per group. When exceeded, oldest messages are silently dropped regardless of `autoFlush` setting (no early flush on cap-hit — avoids noise in very active groups). This prevents unbounded growth from spam.
 - **Display names** are resolved at push time (in `handleInbound`, before buffering) since the user context is available then.
 
 **TTL:** 60 minutes. Chosen to capture a full conversation window. If the process crashes, the buffer is lost — acceptable tradeoff to avoid premature disk persistence.
 
-**Existing configs:** Groups without `mode` or `autoFlush` fields require no migration — both default to `'filtered'` and `'discard'` respectively via code-level defaults.
+**Existing configs:** Groups without `mode` or `autoFlush` fields require no migration — both default to `'filtered'` and `'forward'` respectively via code-level defaults.
 
 ### 4. Notification Format
 
@@ -114,28 +114,16 @@ class MessageBuffer {
 ```
 
 - `auto_flushed="true"` tells Claude this is background context, not a request.
-- No `message_id` or `reply_to` in meta — Claude can only respond proactively via `push_message`.
+- MCP notification meta includes `chat_id` (so Claude knows where to `push_message`) but no `message_id` or `reply_to`.
 - Security suffix is appended after the context block.
 
-### 5. Flow Changes in `server.ts`
+**Non-text messages in buffer:** Buffered messages use the same `formatInboundContent()` output already used for filtered mode (e.g., `(sticker: ...)`, `(image: ...)`). No special handling needed.
 
-```
-Group message arrives
-  -> Is group enabled? (unchanged)
-  -> What mode?
+### 5. Filter Function & Flow
 
-    "filtered" (default):
-      -> Current behavior, unchanged
+All mode branching lives inside `shouldForwardGroupMessage`. The function already has access to `config.groups[groupId]`, so it reads `mode` from there. `server.ts` just acts on the result.
 
-    "observer":
-      -> Is this a trigger? (mention or prefix match)
-        YES -> flush buffer + format trigger -> single notification -> send
-        NO  -> push to buffer, return (no notification)
-```
-
-### 6. Filter Return Type Update
-
-`shouldForwardGroupMessage` needs to distinguish between "drop" and "buffer":
+**Updated `FilterResult`:**
 
 ```typescript
 export interface FilterResult {
@@ -145,13 +133,38 @@ export interface FilterResult {
 }
 ```
 
-In observer mode:
-- Non-triggered messages return `{ forward: false, buffer: true }`.
-- Triggered messages return `{ forward: true, text }` — prefix stripping still applies when `triggerPrefix` matches.
+**`shouldForwardGroupMessage` logic:**
 
-In filtered mode: unchanged (`{ forward: false }` for non-triggered, `{ forward: true, text }` for triggered).
+```
+Is group enabled? No → { forward: false }
 
-**Constraint:** Observer mode requires at least one trigger mechanism — either `requireMention: true` (default) or a `triggerPrefix`. If a group has `mode: 'observer'` with `requireMention: false` and no `triggerPrefix`, every message would be a trigger and the buffer would flush immediately, making it identical to "forward all." The `shouldForwardGroupMessage` function treats this as valid (not an error) but the docs should warn that this combination makes observer mode pointless.
+What mode? (default: 'filtered')
+
+  "filtered":
+    → Current logic, unchanged (prefix → mention → forward-all)
+
+  "observer":
+    Has triggerPrefix?
+      YES, message matches prefix → { forward: true, text: stripped }
+      YES, message doesn't match → { forward: false, buffer: true }
+    No triggerPrefix, requireMention?
+      YES, is mention → { forward: true, text }
+      YES, not mention → { forward: false, buffer: true }
+    Neither trigger set → { forward: true, text }  (every msg is trigger)
+```
+
+**Key: prefix still takes absolute priority in observer mode.** When `triggerPrefix` is set, a @mention that doesn't match the prefix returns `{ forward: false, buffer: true }` — it gets buffered, not forwarded. This preserves the existing precedence where prefix overrides mention.
+
+**`server.ts` flow (simplified):**
+
+```
+result = shouldForwardGroupMessage(...)
+if result.forward → flush buffer + trigger → send notification
+else if result.buffer → push to buffer
+else → drop (filtered mode)
+```
+
+**Constraint:** Observer mode requires at least one trigger mechanism — either `requireMention: true` (default) or a `triggerPrefix`. If a group has `mode: 'observer'` with `requireMention: false` and no `triggerPrefix`, every message is a trigger and the buffer flushes immediately, making it identical to "forward all." The function treats this as valid (not an error) but the docs should warn that this combination makes observer mode pointless.
 
 ### 7. Skill & Docs Updates
 
@@ -172,6 +185,7 @@ In filtered mode: unchanged (`{ forward: false }` for non-triggered, `{ forward:
 - `cleanup()` with `forward` returns expired messages for notification
 - Messages within TTL are not cleaned up
 - Multiple groups buffer independently
+- Buffer cap (200) drops oldest messages when exceeded
 
 **Unit tests: `__tests__/gate-filter.test.ts`** (update)
 - Observer mode returns `{ forward: false, buffer: true }` for non-triggered messages
@@ -192,7 +206,7 @@ In filtered mode: unchanged (`{ forward: false }` for non-triggered, `{ forward:
 |------|--------|
 | `access.ts` | Add `mode`, `autoFlush` to `GroupConfig`; add `buffer` to `FilterResult`; update `shouldForwardGroupMessage` |
 | `message-buffer.ts` | New — `MessageBuffer` class |
-| `server.ts` | Buffer logic in `handleInbound`, cleanup interval, flush formatting |
+| `server.ts` | Extract `handleInbound` for testability; buffer logic; cleanup interval; `formatObserverNotification()` helper (shared by trigger-flush and auto-flush paths) |
 | `ACCESS.md` | Document observer mode, exact field names |
 | `skills/access/SKILL.md` | Add `set` command, explicit field names, `--observer` flag |
 | `__tests__/message-buffer.test.ts` | New — buffer unit tests |
