@@ -17,13 +17,30 @@ All DMs are silently dropped.
 
 Groups are opt-in. When the bot is added to a group it hasn't been enabled for, it replies with the group ID and instructions.
 
+### Group Modes
+
+#### Filtered (default)
+Messages that don't match a trigger (mention or prefix) are silently dropped. Claude only sees triggered messages.
+
+#### Observer
+All messages are buffered in memory. When a trigger arrives, Claude receives the buffered conversation context alongside the trigger message in a single notification. This lets Claude understand the conversation before responding.
+
+Enable observer mode: `/line:access set <GROUP_ID> mode observer`
+
 ### Message Filtering
 
-Enabled groups have configurable message filtering:
+Both modes use the same trigger rules:
 
-- **`requireMention: true`** (default) — Only messages that @mention the bot are forwarded
-- **`triggerPrefix`** (e.g., `"小助理"`) — Only messages starting with the prefix are forwarded. The prefix is stripped.
-- **`requireMention: false`** + no prefix — All messages forwarded
+- **`requireMention: true`** (default) — Only @mentions trigger the bot
+- **`triggerPrefix`** (e.g., `"CC"`) — Only messages starting with the prefix trigger the bot. The prefix is stripped from the forwarded text. Takes priority over `requireMention`.
+- **`requireMention: false`** + no prefix — All messages trigger (observer mode becomes equivalent to "forward all")
+
+### Auto-Flush (Observer Mode)
+
+When buffered messages expire (60-min TTL) or the buffer cap (200 messages) is hit:
+
+- **`autoFlush: "forward"`** (default) — Expired/capped messages are sent to Claude as background context
+- **`autoFlush: "discard"`** — Expired/capped messages are silently dropped
 
 DMs always forward without any filter.
 
@@ -41,7 +58,10 @@ DMs always forward without any filter.
   "groups": {
     "C9876efgh...": {
       "enabled": true,
-      "requireMention": true
+      "requireMention": true,
+      "triggerPrefix": "CC",
+      "mode": "observer",
+      "autoFlush": "forward"
     }
   }
 }
@@ -52,4 +72,5 @@ DMs always forward without any filter.
 - `/line:access pair <CODE>` — Approve pairing
 - `/line:access allow <ID>` — Add user/group
 - `/line:access deny <ID>` — Remove user/disable group
+- `/line:access set <GROUP_ID> <field> <value>` — Set group config field
 - `/line:access list` — Show current state
