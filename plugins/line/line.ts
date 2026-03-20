@@ -100,7 +100,7 @@ export class LineClient {
   }
 
   async setWebhookUrl(url: string): Promise<void> {
-    await this.client.setWebhookEndpointUrl({ endpoint: url })
+    await this.client.setWebhookEndpoint({ endpoint: url })
   }
 
   async testWebhook(): Promise<boolean> {
