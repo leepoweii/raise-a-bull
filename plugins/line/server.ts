@@ -230,6 +230,7 @@ Access is managed by the /line:access skill — the user runs it in their termin
   // --- Inbound Message Handler ---
 
   async function handleInbound(msg: InboundMessage): Promise<void> {
+    console.error(`[line] Inbound: "${msg.text}" from ${msg.userId} (chat: ${msg.chatId})`)
     reloadAccess()
     const isGroup = msg.chatId !== msg.userId
 
@@ -282,7 +283,8 @@ Access is managed by the /line:access skill — the user runs it in their termin
       }
     }
 
-    void mcp.notification({
+    console.error(`[line] Sending notification for msg ${msg.messageId} from ${displayName}`)
+    mcp.notification({
       method: 'notifications/claude/channel',
       params: {
         content: msg.text,
@@ -295,7 +297,7 @@ Access is managed by the /line:access skill — the user runs it in their termin
           message_type: msg.messageType,
         },
       },
-    })
+    }).catch((err) => console.error('[line] Notification error:', err))
   }
 
   // --- Connect MCP FIRST (before HTTP server, so notifications work immediately) ---
