@@ -53,8 +53,8 @@ function loadEnv(): { secret: string; token: string } | null {
 function parseArgs(): { port: number; tunnelUrl?: string; noTunnel?: boolean } {
   const args = process.argv.slice(2)
   let port = parseInt(process.env.LINE_PORT || '3000')
-  let tunnelUrl: string | undefined
-  let noTunnel = false
+  let tunnelUrl: string | undefined = process.env.LINE_TUNNEL_URL
+  let noTunnel = process.env.LINE_NO_TUNNEL === '1' || process.env.LINE_NO_TUNNEL === 'true'
 
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith('--port=')) port = parseInt(args[i].split('=')[1])
