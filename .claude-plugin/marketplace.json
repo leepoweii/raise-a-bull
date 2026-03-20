@@ -10,7 +10,7 @@
   },
   "plugins": [
     {
-      "name": "claude-code-channel-line",
+      "name": "line",
       "description": "LINE channel for Claude Code — DMs, group chats, observer mode, access control, auto-tunnel",
       "version": "0.1.0",
       "source": {
