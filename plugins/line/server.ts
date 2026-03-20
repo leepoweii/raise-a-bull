@@ -138,7 +138,7 @@ async function main() {
     tools: [
       {
         name: 'reply',
-        description: 'Reply to a LINE message. Uses reply token (free) if available, falls back to push API.',
+        description: 'ALWAYS use this to respond to LINE messages. Uses reply token (free) when available, falls back to push API. This is the default way to respond — use push_message only for proactive messages with no prior inbound event.',
         inputSchema: {
           type: 'object' as const,
           properties: {
@@ -151,7 +151,7 @@ async function main() {
       },
       {
         name: 'push_message',
-        description: 'Send a proactive message to a LINE user or group. Always uses push API (costs quota). Use for unsolicited messages where there is no recent inbound event.',
+        description: 'Send a proactive message when there is NO recent inbound message to reply to (e.g. scheduled notifications, heartbeats). Uses push API which costs quota. Do NOT use this to respond to user messages — use reply instead.',
         inputSchema: {
           type: 'object' as const,
           properties: {
