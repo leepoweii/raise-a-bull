@@ -67,6 +67,14 @@ export class LineClient {
     this.tokenCache.set(messageId, chatId, replyToken)
   }
 
+  async showLoading(userId: string, seconds = 60): Promise<void> {
+    try {
+      await this.client.showLoadingAnimation({ chatId: userId, loadingSeconds: seconds })
+    } catch {
+      // Loading animation only works in 1-on-1 chats, silently ignore errors
+    }
+  }
+
   async reply(chatId: string, text: string, replyTo: string): Promise<void> {
     const chunks = chunkMessage(text)
     const messages = chunks.map((c) => ({ type: 'text' as const, text: c }))
