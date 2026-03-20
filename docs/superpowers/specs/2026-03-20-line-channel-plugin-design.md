@@ -18,7 +18,7 @@ Claude Code has official channel plugins for Discord and Telegram, but not LINE.
 2. **Zero-config tunnel** — Default startup spawns a quick cloudflared tunnel and auto-sets the LINE webhook URL. No DNS, no Cloudflare account, no manual webhook config.
 3. **Try reply, fall back to push** — Use reply token first (free). If it fails (expired), fall back to push API (costs quota). No timestamp tracking.
 4. **Always respond** — Unknown users and unenabled groups get a helpful response with their ID, never silence.
-5. **Two-file split** — `server.ts` (MCP + access control + tools) and `line.ts` (LINE platform adapter). Clean separation for readability and future reuse.
+5. **Modular split** — `server.ts` (MCP + tools), `line.ts` (LINE platform adapter), `access.ts` (access control logic). Clean separation for readability, testability, and future reuse.
 
 ---
 
