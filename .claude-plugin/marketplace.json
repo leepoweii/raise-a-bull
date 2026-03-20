@@ -1,12 +1,9 @@
 {
   "name": "raise-a-bull",
+  "description": "Claude Code plugins by raise-a-bull",
   "owner": {
     "name": "pwlee",
     "email": "pw@pwlee.xyz"
-  },
-  "metadata": {
-    "description": "Claude Code plugins by raise-a-bull",
-    "version": "1.0.0"
   },
   "plugins": [
     {
