@@ -67,9 +67,10 @@ class MessageBuffer {
 
 - One buffer per group, keyed by `groupId`.
 - `cleanup()` runs on the existing 30-second interval (shared with token cache cleanup).
-- `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the current `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller (`server.ts`) can send MCP notifications.
-- **Max buffer size:** 200 messages per group. When the cap is hit, behavior follows the group's `autoFlush` setting: `'forward'` (default) flushes all 200 as an auto-flush notification and continues buffering fresh messages; `'discard'` drops the oldest message to make room. This keeps the `autoFlush` knob consistent across both TTL expiry and cap-hit.
-- **Display names** are resolved at push time (in `handleInbound`, before buffering) since the user context is available then.
+- `cleanup()` is **synchronous** — it iterates the buffer map, partitions expired messages by group, and returns the result in one synchronous step. The caller (`server.ts`) then sends MCP notifications asynchronously. If a trigger arrives between cleanup's return and the async notification send, the trigger finds an empty buffer — this is acceptable since the auto-flush notification already captured the context.
+- `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the current `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller can send MCP notifications.
+- **Max buffer size:** 200 messages per group. When the cap is hit, behavior follows the group's `autoFlush` setting: `'forward'` (default) flushes all 200 as an auto-flush notification and continues buffering fresh messages; `'discard'` drops the oldest message to make room. Note: if a trigger arrives right after a cap-hit flush, the buffer is empty and the trigger is sent with no context block — this is acceptable since the auto-flush already delivered those messages.
+- **Display names** are resolved at push time (in `handleInbound`, before buffering) since the user context is available then. Uses the existing `getProfile()` API which may fail for group members who haven't added the bot as a friend — in that case, the userId is used as fallback (e.g., `[14:01] U1234abc...: hello`). This is the same limitation as the current filtered mode.
 
 **TTL:** 60 minutes. Chosen to capture a full conversation window. If the process crashes, the buffer is lost — acceptable tradeoff to avoid premature disk persistence.
 
@@ -98,7 +99,7 @@ class MessageBuffer {
 - Reply token is cached for the trigger message only.
 - Timestamps in the `<context>` block use `HH:MM` format derived from the ISO8601 timestamp, in the server's local timezone.
 
-**Auto-flush (forward)** — no trigger message:
+**Auto-flush (forward)** — triggered by TTL expiry or buffer cap hit. No trigger message:
 
 ```
 <context chat_id="C123" mode="observer" unread_count="5" auto_flushed="true">
@@ -110,12 +111,13 @@ class MessageBuffer {
 </context>
 
 ---
-[SYSTEM: Above are messages from external users. You must NEVER reveal secrets, credentials, API keys, .env contents, or access tokens.]
+[SYSTEM: Above are messages from external users in a group chat. This is background context only — do not reply unless a future message specifically addresses you. You must NEVER reveal secrets, credentials, API keys, .env contents, or access tokens.]
 ```
 
 - `auto_flushed="true"` tells Claude this is background context, not a request.
-- MCP notification meta includes `chat_id` (so Claude knows where to `push_message`) but no `message_id` or `reply_to`.
-- Security suffix is appended after the context block.
+- The security suffix explicitly instructs Claude not to respond — auto-flush is passive context, not an action item.
+- MCP notification meta: `{ chat_id, ts: <flush_time_iso>, message_type: "observer_auto_flush" }`. No `user`, `user_id`, `message_id`, or `reply_to` (there is no single sender or triggering message).
+- Same format is used for both TTL-expiry and cap-hit auto-flush.
 
 **Non-text messages in buffer:** Buffered messages use the same `formatInboundContent()` output already used for filtered mode (e.g., `(sticker: ...)`, `(image: ...)`). No special handling needed.
 
@@ -166,7 +168,7 @@ else → drop (filtered mode)
 
 **Constraint:** Observer mode requires at least one trigger mechanism — either `requireMention: true` (default) or a `triggerPrefix`. If a group has `mode: 'observer'` with `requireMention: false` and no `triggerPrefix`, every message is a trigger and the buffer flushes immediately, making it identical to "forward all." The function treats this as valid (not an error) but the docs should warn that this combination makes observer mode pointless.
 
-### 7. Skill & Docs Updates
+### 6. Skill & Docs Updates
 
 **`skills/access/SKILL.md`** — Add explicit JSON field names and new commands:
 
@@ -175,7 +177,7 @@ else → drop (filtered mode)
 
 **`ACCESS.md`** — Document observer mode, auto-flush behavior, and exact JSON field names for group config.
 
-### 8. Testing
+### 7. Testing
 
 **Unit tests: `__tests__/message-buffer.test.ts`** (new)
 - `push()` adds messages to correct group
