@@ -5,6 +5,8 @@ export interface GroupConfig {
   enabled: boolean
   requireMention: boolean
   triggerPrefix?: string
+  mode?: 'filtered' | 'observer'
+  autoFlush?: 'discard' | 'forward'
 }
 
 export interface PairingEntry {
@@ -102,6 +104,7 @@ export function removeFromAllowlist(config: AccessConfig, id: string): void {
 
 export interface FilterResult {
   forward: boolean
+  buffer?: boolean
   text?: string
 }
 
@@ -114,17 +117,20 @@ export function shouldForwardGroupMessage(
   const group = config.groups[groupId]
   if (!group?.enabled) return { forward: false }
 
+  const isObserver = group.mode === 'observer'
+
   // triggerPrefix takes priority over requireMention
   if (group.triggerPrefix) {
     if (text.startsWith(group.triggerPrefix)) {
       return { forward: true, text: text.slice(group.triggerPrefix.length).trim() }
     }
-    return { forward: false }
+    return isObserver ? { forward: false, buffer: true } : { forward: false }
   }
 
   // requireMention (default true)
   if (group.requireMention !== false) {
-    return isMention ? { forward: true, text } : { forward: false }
+    if (isMention) return { forward: true, text }
+    return isObserver ? { forward: false, buffer: true } : { forward: false }
   }
 
   // requireMention: false, no prefix — forward all
