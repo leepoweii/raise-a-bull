@@ -45,6 +45,10 @@ export function isUserAllowed(config: AccessConfig, userId: string): boolean {
   return config.dms.allowlist.includes(userId)
 }
 
+export function isAllowedChat(config: AccessConfig, chatId: string): boolean {
+  return isUserAllowed(config, chatId) || isGroupEnabled(config, chatId)
+}
+
 export function isGroupEnabled(config: AccessConfig, groupId: string): boolean {
   return config.groups[groupId]?.enabled === true
 }

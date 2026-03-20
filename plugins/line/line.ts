@@ -113,6 +113,7 @@ export class LineClient {
   }
 
   async downloadImage(messageId: string, inboxDir: string): Promise<string> {
+    if (/[\/\\]/.test(messageId)) throw new Error('Invalid message ID')
     const { mkdirSync } = await import('fs')
     mkdirSync(inboxDir, { recursive: true })
     const stream = await this.blobClient.getMessageContent(messageId)
