@@ -1,0 +1,17 @@
+{
+  "name": "claude-channel-line",
+  "version": "0.1.0",
+  "description": "LINE Messaging API channel plugin for Claude Code",
+  "scripts": {
+    "start": "bun server.ts",
+    "setup": "bun install --no-summary",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@line/bot-sdk": "^9.0.0",
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

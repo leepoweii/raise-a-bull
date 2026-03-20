@@ -1,0 +1,8 @@
+{
+  "name": "claude-channel-line",
+  "description": "LINE Messaging API channel plugin for Claude Code — receive and send LINE messages from a persistent Claude Code session",
+  "author": {
+    "name": "pwlee"
+  },
+  "version": "0.1.0"
+}
