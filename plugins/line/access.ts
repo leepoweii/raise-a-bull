@@ -95,3 +95,34 @@ export function removeFromAllowlist(config: AccessConfig, id: string): void {
     config.dms.allowlist = config.dms.allowlist.filter((u) => u !== id)
   }
 }
+
+export interface FilterResult {
+  forward: boolean
+  text?: string
+}
+
+export function shouldForwardGroupMessage(
+  config: AccessConfig,
+  groupId: string,
+  text: string,
+  isMention: boolean
+): FilterResult {
+  const group = config.groups[groupId]
+  if (!group?.enabled) return { forward: false }
+
+  // triggerPrefix takes priority over requireMention
+  if (group.triggerPrefix) {
+    if (text.startsWith(group.triggerPrefix)) {
+      return { forward: true, text: text.slice(group.triggerPrefix.length).trim() }
+    }
+    return { forward: false }
+  }
+
+  // requireMention (default true)
+  if (group.requireMention !== false) {
+    return isMention ? { forward: true, text } : { forward: false }
+  }
+
+  // requireMention: false, no prefix — forward all
+  return { forward: true, text }
+}
