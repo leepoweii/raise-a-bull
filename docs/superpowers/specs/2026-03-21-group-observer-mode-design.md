@@ -68,7 +68,7 @@ class MessageBuffer {
 - One buffer per group, keyed by `groupId`.
 - `cleanup()` runs on the existing 30-second interval (shared with token cache cleanup).
 - `cleanup()` accepts a callback `getAutoFlush(groupId)` that looks up the group's `autoFlush` setting from the current `AccessConfig`. For `'discard'` groups, expired messages are silently dropped. For `'forward'` groups, expired messages are returned in the result map so the caller (`server.ts`) can send MCP notifications.
-- **Max buffer size:** 200 messages per group. When exceeded, oldest messages are silently dropped regardless of `autoFlush` setting (no early flush on cap-hit — avoids noise in very active groups). This prevents unbounded growth from spam.
+- **Max buffer size:** 200 messages per group. When the cap is hit, behavior follows the group's `autoFlush` setting: `'forward'` (default) flushes all 200 as an auto-flush notification and continues buffering fresh messages; `'discard'` drops the oldest message to make room. This keeps the `autoFlush` knob consistent across both TTL expiry and cap-hit.
 - **Display names** are resolved at push time (in `handleInbound`, before buffering) since the user context is available then.
 
 **TTL:** 60 minutes. Chosen to capture a full conversation window. If the process crashes, the buffer is lost — acceptable tradeoff to avoid premature disk persistence.
@@ -185,7 +185,8 @@ else → drop (filtered mode)
 - `cleanup()` with `forward` returns expired messages for notification
 - Messages within TTL are not cleaned up
 - Multiple groups buffer independently
-- Buffer cap (200) drops oldest messages when exceeded
+- Buffer cap (200) with `autoFlush: 'forward'` triggers auto-flush notification
+- Buffer cap (200) with `autoFlush: 'discard'` drops oldest messages
 
 **Unit tests: `__tests__/gate-filter.test.ts`** (update)
 - Observer mode returns `{ forward: false, buffer: true }` for non-triggered messages
