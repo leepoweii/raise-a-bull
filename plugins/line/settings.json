@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin:claude-channel-line:line__reply",
+      "mcp__plugin:claude-channel-line:line__push_message",
+      "mcp__plugin:claude-channel-line:line__get_profile"
+    ]
+  }
+}
