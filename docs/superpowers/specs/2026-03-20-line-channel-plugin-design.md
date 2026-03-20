@@ -247,7 +247,7 @@ Following the Discord/Telegram pairing pattern.
     }
   },
   "groups": {
-    "C9876...": { "enabled": true, "triggerPrefix": "小助理" }
+    "C9876...": { "enabled": true, "requireMention": true }
   }
 }
 ```
@@ -262,12 +262,13 @@ Following the Discord/Telegram pairing pattern.
 
 Opt-in by group/room ID. Unenabled groups get a response with their group ID and instructions.
 
-**Message filtering in enabled groups:** Configurable per group via `triggerPrefix` or `requireMention`. This prevents the bot from being noisy and replying to every message in group chats.
+**Message filtering in enabled groups:** Default is `requireMention: true` — only messages that @mention the bot are forwarded to Claude. This prevents the bot from being noisy in group chats.
 
-- **`triggerPrefix`** (e.g., `"小助理"`): Only messages starting with the prefix are forwarded to Claude. The prefix is stripped before forwarding.
-- **`requireMention`**: Only messages that @mention the bot are forwarded.
-- **Neither set**: All messages forwarded (use with caution in active groups).
-- **DMs always forward** — no prefix/mention filter in personal chats (same as current raise-a-bull behavior).
+Configurable per group:
+- **`requireMention: true`** (default): Only messages that @mention the bot are forwarded.
+- **`triggerPrefix`** (e.g., `"小助理"`): Only messages starting with the prefix are forwarded. The prefix is stripped before forwarding. Overrides `requireMention`.
+- **`requireMention: false`** + no prefix: All messages forwarded (use with caution in active groups).
+- **DMs always forward** — no filter in personal chats (same as current raise-a-bull behavior).
 
 **Leave/unfollow events:** When the bot is removed from a group or a user blocks the bot, the plugin logs the event but does NOT auto-remove from `access.json`. Stale entries are harmless — messages simply stop arriving.
 
@@ -283,9 +284,9 @@ Incoming message
   └─ From group?
       ├─ Group not enabled → reply with group_id + instructions
       └─ Group enabled
-          ├─ triggerPrefix set → starts with prefix? strip prefix, forward to Claude
-          ├─ requireMention set → @mentions bot? forward to Claude
-          ├─ Neither set → forward all to Claude
+          ├─ triggerPrefix set → starts with prefix? strip prefix, forward
+          ├─ No prefix → requireMention (default true) → @mentions bot? forward
+          ├─ requireMention: false + no prefix → forward all
           └─ Doesn't match filter → silently ignore
 ```
 
