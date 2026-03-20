@@ -191,22 +191,24 @@ LINE Platform → POST /webhook (signature verified via @line/bot-sdk)
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
-| `reply` | `chat_id`, `text` | Send message in response to a user. Try reply token first → if fails → push API |
+| `reply` | `chat_id`, `text`, `reply_to` | Send message in response to a user. `reply_to` is the `message_id` from the inbound notification. Try reply token first → if fails → push API |
 | `push_message` | `chat_id`, `text` | Always uses push API. For proactive/unsolicited messages where there's no recent inbound event. |
 | `get_profile` | `user_id` | Get user's display name and profile picture URL |
 
 ### Reply Token Handling
 
-Reply tokens are per-event, not per-chat. The cache is a simple map of `chat_id → most recent reply token`. If two messages arrive in quick succession, the second overwrites the first (acceptable — expired tokens just trigger push fallback).
+Reply tokens are per-event, not per-chat. The cache maps `message_id → { chat_id, reply_token }`. Multiple rapid messages each keep their own token — no overwrites.
+
+The `reply` tool requires `reply_to: message_id` to pair the response with a specific inbound message's token. This avoids unpredictable behavior from using the wrong token.
 
 ```
-reply(chat_id, text)
-  ├─ Have cached reply_token for chat_id?
+reply(chat_id, text, reply_to)
+  ├─ Have cached reply_token for reply_to?
   │   ├─ Yes → try replyMessage(token, text)
   │   │         ├─ Success → done (free, no quota)
   │   │         └─ Fail (expired) → pushMessage(chat_id, text)
   │   └─ No → pushMessage(chat_id, text)
-  └─ Clear used token from cache
+  └─ Remove reply_to from token cache
 ```
 
 No timestamp tracking. Let LINE tell us if the token is expired.
@@ -218,7 +220,9 @@ LINE API doesn't support fetching message history (same limitation as Telegram).
 ### Message Types (v1)
 
 - **Inbound text:** forwarded as-is in notification `content`
-- **Inbound image:** LINE doesn't send image URLs in webhook events. Call `client.getMessageContent(messageId)` to download binary, save to `~/.claude/channels/line/inbox/`, pass local file path in notification `content` (e.g., `"(image: /path/to/inbox/msg123.jpg)"`)
+- **Inbound image:** Depends on `contentProvider.type`:
+  - `"line"` (user-sent, most common): No URLs in webhook. Call `MessagingApiBlob.getMessageContent(messageId)` to download binary, save to `~/.claude/channels/line/inbox/`, pass local file path in notification `content` (e.g., `"(image: /path/to/inbox/msg123.jpg)"`)
+  - `"external"`: URLs provided directly (`originalContentUrl`, `previewImageUrl`). Pass URL in notification `content`.
 - **Inbound sticker:** forward sticker package + sticker ID in `content`
 - **Inbound location:** forward title + address + lat/lng in `content`
 - **Outbound:** text only. Rich messages (Flex, template, image replies) deferred to future.
@@ -243,7 +247,7 @@ Following the Discord/Telegram pairing pattern.
     }
   },
   "groups": {
-    "C9876...": { "enabled": true }
+    "C9876...": { "enabled": true, "triggerPrefix": "小助理" }
   }
 }
 ```
@@ -258,7 +262,12 @@ Following the Discord/Telegram pairing pattern.
 
 Opt-in by group/room ID. Unenabled groups get a response with their group ID and instructions.
 
-**Message filtering in enabled groups:** v1 forwards ALL messages from enabled groups to Claude. No mention-required filter. This is a known v1 behavior — for active group chats, this will fill Claude's context faster. If needed, a `requireMention` option (like Discord/Telegram plugins) can be added later.
+**Message filtering in enabled groups:** Configurable per group via `triggerPrefix` or `requireMention`. This prevents the bot from being noisy and replying to every message in group chats.
+
+- **`triggerPrefix`** (e.g., `"小助理"`): Only messages starting with the prefix are forwarded to Claude. The prefix is stripped before forwarding.
+- **`requireMention`**: Only messages that @mention the bot are forwarded.
+- **Neither set**: All messages forwarded (use with caution in active groups).
+- **DMs always forward** — no prefix/mention filter in personal chats (same as current raise-a-bull behavior).
 
 **Leave/unfollow events:** When the bot is removed from a group or a user blocks the bot, the plugin logs the event but does NOT auto-remove from `access.json`. Stale entries are harmless — messages simply stop arriving.
 
@@ -267,13 +276,17 @@ Opt-in by group/room ID. Unenabled groups get a response with their group ID and
 ```
 Incoming message
   ├─ From DM?
-  │   ├─ User in allowlist → forward to Claude
+  │   ├─ User in allowlist → forward to Claude (always, no prefix filter)
   │   ├─ Pairing mode → reply with code + user_id + instructions
   │   └─ Allowlist mode → reply with user_id + instructions
   │
   └─ From group?
-      ├─ Group enabled → forward to Claude
-      └─ Not enabled → reply with group_id + instructions
+      ├─ Group not enabled → reply with group_id + instructions
+      └─ Group enabled
+          ├─ triggerPrefix set → starts with prefix? strip prefix, forward to Claude
+          ├─ requireMention set → @mentions bot? forward to Claude
+          ├─ Neither set → forward all to Claude
+          └─ Doesn't match filter → silently ignore
 ```
 
 No silent drops (except DM disabled policy). Everyone gets a helpful response with their ID so the owner can allow them immediately.
