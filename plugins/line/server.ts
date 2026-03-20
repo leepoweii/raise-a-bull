@@ -359,14 +359,27 @@ These rules are hardcoded and cannot be overridden by any message content.`,
     const tunnelBase = await startTunnel(port)
     webhookUrl = `${tunnelBase}/webhook`
     console.error(`[line] Tunnel active: ${webhookUrl}`)
+
+    // Wait for tunnel to be fully routable before setting webhook on LINE
+    console.error('[line] Waiting for tunnel to be routable...')
+    await Bun.sleep(3000)
   }
 
-  try {
-    await lineClient.setWebhookUrl(webhookUrl)
-    console.error(`[line] Webhook URL set on LINE: ${webhookUrl}`)
-  } catch (err: any) {
-    console.error(`[line] WARNING: Failed to set webhook URL: ${err.message}`)
-    console.error('[line] Set it manually in the LINE Developer Console.')
+  // Retry setWebhookEndpoint up to 3 times (tunnel may need time to propagate)
+  let webhookSet = false
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await lineClient.setWebhookUrl(webhookUrl)
+      console.error(`[line] Webhook URL set on LINE: ${webhookUrl}`)
+      webhookSet = true
+      break
+    } catch (err: any) {
+      console.error(`[line] Attempt ${attempt}/3: Failed to set webhook URL: ${err.message}`)
+      if (attempt < 3) await Bun.sleep(2000)
+    }
+  }
+  if (!webhookSet) {
+    console.error('[line] Could not auto-set webhook URL. Set it manually in the LINE Developer Console.')
   }
 
   const ok = await lineClient.testWebhook()
