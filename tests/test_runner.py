@@ -97,6 +97,33 @@ async def test_run_stdout_is_error_not_overwritten_by_returncode(tmp_path):
     assert result.text == ""
 
 
+def test_build_cmd_includes_model_flag():
+    runner = ClaudeRunner(model="test-model")
+    cmd = runner._build_cmd("hi", None)
+    assert "--model" in cmd
+    assert "test-model" in cmd
+
+
+def test_build_cmd_no_workspace_omits_add_dir():
+    runner = ClaudeRunner(workspace="")
+    cmd = runner._build_cmd("hi", None)
+    assert "--add-dir" not in cmd
+
+
+@pytest.mark.asyncio
+async def test_run_timeout_returns_error(tmp_path):
+    import stat as stat_mod
+
+    fake = tmp_path / "claude"
+    fake.write_text("#!/bin/sh\nsleep 10\n")
+    fake.chmod(fake.stat().st_mode | stat_mod.S_IEXEC)
+
+    runner = ClaudeRunner(claude_bin=str(fake))
+    result = await runner.run("hi", timeout_seconds=0.5)
+    assert result.error is not None
+    assert "timed out" in result.error.lower()
+
+
 import json
 
 def test_parse_lines_fires_trace_steps():

@@ -26,3 +26,25 @@ async def test_clear(store):
     await store.save("line:U123", session_id="s1", domain="line", token_count=0)
     await store.clear("line:U123")
     assert await store.get("line:U123") is None
+
+
+@pytest.mark.asyncio
+async def test_update_tokens_success(store):
+    await store.save("discord:42", session_id="s1", domain="discord", token_count=0)
+    await store.update_tokens("discord:42", 999)
+    row = await store.get("discord:42")
+    assert row["token_count"] == 999
+
+
+@pytest.mark.asyncio
+async def test_update_tokens_missing_key_raises(store):
+    with pytest.raises(KeyError):
+        await store.update_tokens("nonexistent", 1)
+
+
+@pytest.mark.asyncio
+async def test_require_db_before_init_raises():
+    s = SessionStore(":memory:")
+    # init() has NOT been called — any method should raise RuntimeError
+    with pytest.raises(RuntimeError):
+        await s.get("any:key")
