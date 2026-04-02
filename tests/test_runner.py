@@ -95,3 +95,61 @@ async def test_run_stdout_is_error_not_overwritten_by_returncode(tmp_path):
     assert result.stale_session is True
     assert "No conversation found" in result.error
     assert result.text == ""
+
+
+import json
+
+def test_parse_lines_fires_trace_steps():
+    """_parse_lines should still work; trace extraction is in the stream loop."""
+    runner = ClaudeRunner()
+    lines = [
+        json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "Hello!"}]},
+        }).encode(),
+        json.dumps({
+            "type": "result",
+            "session_id": "s1",
+            "cost_usd": 0.01,
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }).encode(),
+    ]
+    result = runner._parse_lines(lines)
+    assert result.text == "Hello!"
+    assert result.session_id == "s1"
+
+
+@pytest.mark.asyncio
+async def test_run_collects_trace_steps(tmp_path):
+    """on_trace callback receives TraceStep objects from stream-json."""
+    import stat as stat_mod
+    from raisebull.trace import TraceStep
+
+    fake = tmp_path / "claude"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'printf \'{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"Let me think..."}]}}\\n\'\n'
+        'printf \'{"type":"assistant","message":{"content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"/tmp/x"}}]}}\\n\'\n'
+        'printf \'{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"c1","content":"file data"}]}}\\n\'\n'
+        'printf \'{"type":"assistant","message":{"content":[{"type":"text","text":"Here is the answer."}]}}\\n\'\n'
+        'printf \'{"type":"result","session_id":"s1","cost_usd":0.0,"usage":{"input_tokens":10,"output_tokens":5}}\\n\'\n'
+        "exit 0\n"
+    )
+    fake.chmod(fake.stat().st_mode | stat_mod.S_IEXEC)
+
+    runner = ClaudeRunner(claude_bin=str(fake))
+    collected: list[TraceStep] = []
+
+    async def on_trace(step: TraceStep):
+        collected.append(step)
+
+    result = await runner.run("test", on_trace=on_trace)
+
+    assert result.text == "Here is the answer."
+    assert result.session_id == "s1"
+    assert len(collected) == 4
+    assert collected[0].step_type == "thinking"
+    assert collected[1].step_type == "tool_call"
+    assert collected[1].content["name"] == "Read"
+    assert collected[2].step_type == "tool_result"
+    assert collected[3].step_type == "text"

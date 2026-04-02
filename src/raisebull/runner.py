@@ -10,9 +10,10 @@ from asyncio.subprocess import DEVNULL, PIPE
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
-
+from raisebull.trace import TraceStep, parse_stream_event
 
 AsyncChunkCallback = Callable[[str], Awaitable[None]]
+AsyncTraceCallback = Callable[[TraceStep], Awaitable[None]]
 
 
 @dataclass
@@ -115,6 +116,7 @@ class ClaudeRunner:
         prompt: str,
         session_id: Optional[str] = None,
         on_chunk: Optional[AsyncChunkCallback] = None,
+        on_trace: Optional[AsyncTraceCallback] = None,
         timeout_seconds: float = 120.0,
     ) -> RunResult:
         cmd = self._build_cmd(prompt, session_id)
@@ -141,16 +143,23 @@ class ClaudeRunner:
                         continue
                     raw_lines.append(line)
 
-                    # Fire on_chunk callback for assistant text as it streams
-                    if on_chunk is not None:
+                    # Parse event once for both callbacks
+                    if on_chunk is not None or on_trace is not None:
                         try:
                             event = json.loads(line)
                         except json.JSONDecodeError:
                             continue
-                        if event.get("type") == "assistant":
+
+                        # on_chunk: fire for assistant text (backwards compat)
+                        if on_chunk is not None and event.get("type") == "assistant":
                             for chunk in self._extract_text_chunks(event):
                                 if chunk:
                                     await on_chunk(chunk)
+
+                        # on_trace: fire for all trace steps
+                        if on_trace is not None:
+                            for step in parse_stream_event(line):
+                                await on_trace(step)
 
                 await proc.wait()
         except TimeoutError:
