@@ -23,6 +23,8 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import ApiClient, Configuration, MessagingApi
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
+import discord
+
 from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
 from raisebull.discord_bot import run_discord_bot, get_bot
@@ -39,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 _sessions: SessionStore | None = None
 _runner: ClaudeRunner | None = None
+_heartbeat_push = None  # set in lifespan
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ _runner: ClaudeRunner | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _sessions, _runner
+    global _sessions, _runner, _heartbeat_push
 
     if not os.getenv("LINE_CHANNEL_SECRET"):
         raise RuntimeError("LINE_CHANNEL_SECRET must be set")
@@ -63,7 +66,23 @@ async def lifespan(app: FastAPI):
         model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
     )
 
-    start_heartbeat(_runner, _sessions)
+    # Wire heartbeat → Discord push via the bot's channel cache
+    async def heartbeat_push(channel_name: str, message: str) -> None:
+        bot_instance = get_bot()
+        if bot_instance is None:
+            logger.warning("Heartbeat push: bot not running, skipping #%s", channel_name)
+            return
+        guild = bot_instance.guilds[0] if bot_instance.guilds else None
+        if guild is None:
+            return
+        channel = discord.utils.get(guild.text_channels, name=channel_name)
+        if channel:
+            await channel.send(message[:2000])
+        else:
+            logger.warning("Heartbeat push: #%s not found", channel_name)
+
+    _heartbeat_push = heartbeat_push
+    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push)
 
     if os.getenv("DISCORD_BOT_TOKEN"):
         async def _discord_task() -> None:
@@ -163,5 +182,5 @@ async def webhook_line(request: Request) -> Response:
 @app.post("/internal/heartbeat/trigger")
 async def heartbeat_trigger() -> dict[str, Any]:
     """Manually trigger one heartbeat tick (for testing). Localhost only."""
-    asyncio.create_task(run_event_check(_runner, _sessions))
+    asyncio.create_task(run_event_check(_runner, _sessions, push_fn=_heartbeat_push))
     return {"ok": True, "message": "heartbeat tick started"}
