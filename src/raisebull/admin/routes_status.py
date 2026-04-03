@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Request
 
-from raisebull.heartbeat import _last_heartbeat_time
+from raisebull import heartbeat as _heartbeat_mod
 
 router = APIRouter()
 
@@ -45,7 +45,7 @@ async def bootstrap(request: Request):
         "version": "0.1.0",
         "accent_color": "#2A4D14",
         "sessions_count": session_count,
-        "last_heartbeat_time": _last_heartbeat_time,
+        "last_heartbeat_time": _heartbeat_mod._last_heartbeat_time,
         "status": "running" if runner else "no runner",
         "bot_connected": bot_connected,
     }
@@ -84,7 +84,7 @@ async def status(request: Request):
         "bot_username": bot.user.name if bot and bot.user else None,
         "guilds": len(bot.guilds) if bot and hasattr(bot, "guilds") else 0,
         "sessions": counts,
-        "heartbeat_last": _last_heartbeat_time,
+        "heartbeat_last": _heartbeat_mod._last_heartbeat_time,
         "model": runner.model if runner else None,
         "workspace": runner.workspace if runner else None,
     }
