@@ -1,0 +1,144 @@
+<h1 class="page-title">Web Chat</h1>
+
+<div x-data="chatPage()" x-init="load()">
+    <div class="chat-layout">
+        <!-- Session list (left panel) -->
+        <div class="card chat-sessions">
+            <div style="padding:8px 12px;border-bottom:var(--border-width) solid var(--border)">
+                <button class="btn btn-primary btn-sm" style="width:100%" @click="newSession()">
+                    + New Chat
+                </button>
+            </div>
+            <div class="chat-session-list">
+                <template x-for="s in sessions" :key="s.id">
+                    <div class="chat-session-item"
+                         :class="{ active: currentSession === s.id, 'discord-session': s.type === 'discord' }"
+                         @click="selectSession(s.id)">
+                        <div class="chat-session-id">
+                            <span x-show="s.type === 'discord'" style="margin-right:4px">🎮</span>
+                            <span x-text="s.name || shortId(s.id)"></span>
+                        </div>
+                        <div class="chat-session-meta">
+                            <span x-text="s.message_count + ' msgs'"></span>
+                            <span x-show="s.type === 'discord'" class="badge badge-muted" style="font-size:9px;margin-left:4px">Discord</span>
+                        </div>
+                    </div>
+                </template>
+                <div x-show="sessions.length === 0" style="padding:16px 12px;color:var(--ink-muted);font-size:12px">
+                    No sessions yet
+                </div>
+            </div>
+        </div>
+
+        <!-- Chat area (right panel) -->
+        <div class="card chat-main">
+            <!-- Mobile: session pills -->
+            <div class="chat-pills">
+                <button class="chat-pill" style="background:var(--accent);color:#fff;border-color:var(--accent)" @click="newSession()">+ New</button>
+                <template x-for="s in sessions" :key="s.id">
+                    <div class="chat-pill" :class="{ active: currentSession === s.id }"
+                         @click="selectSession(s.id)"
+                         x-text="s.name || shortId(s.id)"></div>
+                </template>
+            </div>
+
+            <!-- Placeholder when no session -->
+            <div x-show="!currentSession" class="chat-placeholder">
+                <div>Select a session or start a new chat</div>
+            </div>
+
+            <!-- Messages + input when session selected -->
+            <template x-if="currentSession">
+                <div class="chat-container">
+                    <!-- Header with session info + delete -->
+                    <div class="chat-header">
+                        <span class="mono" x-text="currentSessionName || shortId(currentSession)"></span>
+                        <button x-show="currentSessionType !== 'discord'" class="btn btn-danger btn-sm" @click="deleteSession()">Delete</button>
+                    </div>
+
+                    <!-- Message stream -->
+                    <div class="chat-messages" x-ref="messageContainer">
+                        <template x-for="(msg, idx) in messages" :key="idx">
+                            <div>
+                                <!-- User message -->
+                                <template x-if="msg.role === 'user'">
+                                    <div class="chat-bubble chat-bubble-user">
+                                        <div class="chat-bubble-label">You</div>
+                                        <div x-html="renderMarkdown(msg.content || '')"></div>
+                                    </div>
+                                </template>
+
+                                <!-- Assistant message (handles all combos of content, thinking, tool_calls) -->
+                                <template x-if="msg.role === 'assistant'">
+                                    <div>
+                                        <!-- Thinking block (collapsible) -->
+                                        <template x-if="msg.thinking">
+                                            <details class="chat-thinking">
+                                                <summary>Thinking...</summary>
+                                                <div class="chat-thinking-content" x-html="renderMarkdown(msg.thinking)"></div>
+                                            </details>
+                                        </template>
+                                        <!-- Tool calls -->
+                                        <template x-if="msg.tool_calls">
+                                            <div>
+                                                <template x-for="(tc, ti) in msg.tool_calls" :key="ti">
+                                                    <div class="chat-tool-call">
+                                                        <div class="chat-tool-call-label" x-text="'Tool: ' + (tc.name || tc.function?.name || 'unknown')"></div>
+                                                        <pre class="chat-tool-call-args" x-text="JSON.stringify(tc.arguments || tc.function?.arguments, null, 2)"></pre>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </template>
+                                        <!-- Content bubble -->
+                                        <template x-if="msg.content">
+                                            <div class="chat-bubble chat-bubble-assistant">
+                                                <div class="chat-bubble-label">Assistant</div>
+                                                <div x-html="renderMarkdown(msg.content)"></div>
+                                            </div>
+                                        </template>
+                                    </div>
+                                </template>
+
+                                <!-- Tool result message -->
+                                <template x-if="msg.role === 'tool'">
+                                    <div class="chat-tool-result">
+                                        <div class="chat-tool-result-label" x-text="'Result: ' + (msg.name || 'tool')"></div>
+                                        <pre class="chat-tool-result-content" x-text="typeof msg.content === 'object' ? JSON.stringify(msg.content, null, 2) : (msg.content || '')"></pre>
+                                    </div>
+                                </template>
+                            </div>
+                        </template>
+
+                        <!-- Loading indicator -->
+                        <div x-show="sending" class="chat-bubble chat-bubble-assistant chat-loading">
+                            <div class="chat-bubble-label">Assistant</div>
+                            <div class="chat-loading-dots">
+                                <span></span><span></span><span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Input area -->
+                    <div class="chat-input-area" x-show="currentSessionType !== 'discord'">
+                        <label class="chat-upload-btn" title="Upload file">
+                            📎
+                            <input type="file" style="display:none"
+                                   accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt"
+                                   @change="uploadFile($event)">
+                        </label>
+                        <textarea class="chat-input"
+                                  x-model="input"
+                                  @keydown.meta.enter="send()"
+                                  @keydown.ctrl.enter="send()"
+                                  placeholder="Type a message... (Cmd+Enter to send)"
+                                  :disabled="sending"
+                                  rows="3"></textarea>
+                        <button class="btn btn-primary" @click="send()" :disabled="sending || !input.trim()">
+                            Send
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+    </div>
+</div>

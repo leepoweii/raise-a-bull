@@ -1,0 +1,45 @@
+<h1 class="page-title">Skills</h1>
+
+<div x-data="skillsPage()" x-init="load()">
+    <div class="context-layout">
+        <!-- Skill list -->
+        <div class="card context-filelist" :class="{ 'mobile-hidden': mobileEditing }">
+            <template x-for="skill in skills" :key="skill.name">
+                <div class="file-item" :class="{ active: selectedSkill === skill.name }"
+                     @click="selectSkill(skill.name)">
+                    <div x-text="skill.name"></div>
+                    <div class="file-meta">
+                        <span x-text="formatSize(skill.size)"></span>
+                        <span x-text="'· ' + skill.files.length + ' files'"></span>
+                    </div>
+                </div>
+            </template>
+            <div x-show="skills.length === 0" style="padding:12px;color:var(--ink-muted)">
+                No skills found
+            </div>
+        </div>
+
+        <!-- Editor -->
+        <div class="card context-editor-container" :class="{ 'mobile-hidden': !mobileEditing }">
+            <div class="context-editor-toolbar" x-show="selectedSkill">
+                <button class="btn btn-secondary btn-sm mobile-back-btn" @click="mobileShowList()">&#8592; Back</button>
+                <span class="filename" x-text="selectedSkill + '/SKILL.md'"></span>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="save-indicator" :class="{ unsaved: dirty }"
+                          x-text="dirty ? 'Unsaved changes' : saving ? 'Saving...' : 'Saved'"></span>
+                    <button class="btn btn-primary btn-sm" @click="save()" :disabled="!dirty || saving">
+                        Save
+                    </button>
+                </div>
+            </div>
+            <div class="context-editor-area" x-show="selectedSkill">
+                <textarea x-model="content" @input="markDirty()"
+                          :placeholder="selectedSkill ? 'Loading...' : 'Select a skill'"
+                          style="min-height:400px"></textarea>
+            </div>
+            <div x-show="!selectedSkill" style="padding:40px;text-align:center;color:var(--ink-muted)">
+                Select a skill from the list to edit SKILL.md
+            </div>
+        </div>
+    </div>
+</div>

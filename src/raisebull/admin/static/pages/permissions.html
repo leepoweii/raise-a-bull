@@ -1,0 +1,130 @@
+<h1 class="page-title">Permissions</h1>
+
+<div x-data="permissionsPage()" x-init="load()">
+    <!-- Discord connection notice -->
+    <template x-if="!discordAvailable">
+        <div class="card" style="margin-bottom:16px; background: var(--bg-warning, #fff3cd); border-color: var(--border-warning, #ffc107);">
+            <p style="margin:0; font-size:0.9rem;">Discord bot not connected &mdash; showing saved mappings. Role and channel names must be typed manually.</p>
+        </div>
+    </template>
+
+    <!-- Role Mappings -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Discord Role &rarr; ERP Role</div>
+        <table class="desktop-table">
+            <thead>
+                <tr><th>Discord Role</th><th>ERP Role</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                <template x-for="(rm, idx) in roleMappings" :key="idx">
+                    <tr>
+                        <td>
+                            <template x-if="discordAvailable && discordRoles.length > 0">
+                                <select x-model="rm.discord_role">
+                                    <option value="">-- select role --</option>
+                                    <template x-for="dr in discordRoles" :key="dr.id">
+                                        <option :value="dr.name" x-text="dr.name" :selected="dr.name === rm.discord_role"></option>
+                                    </template>
+                                </select>
+                            </template>
+                            <template x-if="!discordAvailable || discordRoles.length === 0">
+                                <input type="text" x-model="rm.discord_role" placeholder="Discord role name">
+                            </template>
+                        </td>
+                        <td>
+                            <select x-model="rm.erp_role">
+                                <option value="admin">admin</option>
+                                <option value="manager">manager</option>
+                                <option value="staff">staff</option>
+                            </select>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" @click="roleMappings.splice(idx, 1)">Remove</button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+        <div class="mobile-cards">
+            <template x-for="(rm, idx) in roleMappings" :key="idx">
+                <div class="mobile-card">
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Discord</span>
+                        <span x-text="rm.discord_role || '(empty)'"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">ERP Role</span>
+                        <span x-text="rm.erp_role"></span>
+                    </div>
+                    <div class="mobile-card-actions">
+                        <button class="btn btn-danger btn-sm" @click="roleMappings.splice(idx, 1)">Remove</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px"
+                @click="roleMappings.push({ discord_role: '', erp_role: 'staff' })">+ Add Role</button>
+    </div>
+
+    <!-- Channel Config -->
+    <div class="card" style="margin-bottom:16px">
+        <div class="card-title">Channel &rarr; Role Ceiling</div>
+        <table class="desktop-table">
+            <thead>
+                <tr><th>Channel Name</th><th>Role Ceiling</th><th>Actions</th></tr>
+            </thead>
+            <tbody>
+                <template x-for="(cc, idx) in channelConfig" :key="idx">
+                    <tr>
+                        <td>
+                            <template x-if="discordAvailable && discordChannels.length > 0">
+                                <select x-model="cc.channel_name">
+                                    <option value="">-- select channel --</option>
+                                    <template x-for="dc in discordChannels" :key="dc.id">
+                                        <option :value="dc.name" x-text="dc.name" :selected="dc.name === cc.channel_name"></option>
+                                    </template>
+                                </select>
+                            </template>
+                            <template x-if="!discordAvailable || discordChannels.length === 0">
+                                <input type="text" x-model="cc.channel_name" placeholder="channel-name">
+                            </template>
+                        </td>
+                        <td>
+                            <select x-model="cc.role_ceiling">
+                                <option value="admin">admin</option>
+                                <option value="manager">manager</option>
+                                <option value="staff">staff</option>
+                            </select>
+                        </td>
+                        <td>
+                            <button class="btn btn-sm btn-danger" @click="channelConfig.splice(idx, 1)">Remove</button>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+        <div class="mobile-cards">
+            <template x-for="(cc, idx) in channelConfig" :key="idx">
+                <div class="mobile-card">
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Channel</span>
+                        <span x-text="cc.channel_name || '(empty)'"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Ceiling</span>
+                        <span x-text="cc.role_ceiling"></span>
+                    </div>
+                    <div class="mobile-card-actions">
+                        <button class="btn btn-danger btn-sm" @click="channelConfig.splice(idx, 1)">Remove</button>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px"
+                @click="channelConfig.push({ channel_name: '', role_ceiling: 'staff' })">+ Add Channel</button>
+    </div>
+
+    <!-- Save button -->
+    <button class="btn btn-primary" @click="save()" :disabled="saving"
+            x-text="saving ? 'Saving...' : 'Save All'"></button>
+</div>

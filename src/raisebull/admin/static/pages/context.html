@@ -1,0 +1,44 @@
+<h1 class="page-title">Context Files</h1>
+
+<div x-data="contextPage()" x-init="load()">
+    <div class="context-layout">
+        <!-- File list -->
+        <div class="card context-filelist" :class="{ 'mobile-hidden': mobileEditing }">
+            <template x-for="file in files" :key="file.filename">
+                <div class="file-item" :class="{ active: selectedFile === file.filename }"
+                     @click="selectFile(file.filename)">
+                    <div x-text="file.filename"></div>
+                    <div class="file-meta">
+                        <span x-text="formatSize(file.size)"></span>
+                    </div>
+                </div>
+            </template>
+            <div x-show="files.length === 0" style="padding:12px;color:var(--ink-muted)">
+                No context files found
+            </div>
+        </div>
+
+        <!-- Editor -->
+        <div class="card context-editor-container" :class="{ 'mobile-hidden': !mobileEditing }">
+            <div class="context-editor-toolbar" x-show="selectedFile">
+                <button class="btn btn-secondary btn-sm mobile-back-btn" @click="mobileShowList()">&#8592; Back</button>
+                <span class="filename" x-text="selectedFile"></span>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span class="save-indicator" :class="{ unsaved: dirty }"
+                          x-text="dirty ? 'Unsaved changes' : saving ? 'Saving...' : 'Saved'"></span>
+                    <button class="btn btn-primary btn-sm" @click="save()" :disabled="!dirty || saving">
+                        Save
+                    </button>
+                </div>
+            </div>
+            <div class="context-editor-area" x-show="selectedFile">
+                <textarea x-model="content" @input="markDirty()"
+                          :placeholder="selectedFile ? 'Loading...' : 'Select a file'"
+                          style="min-height:400px"></textarea>
+            </div>
+            <div x-show="!selectedFile" style="padding:40px;text-align:center;color:var(--ink-muted)">
+                Select a file from the list to edit
+            </div>
+        </div>
+    </div>
+</div>

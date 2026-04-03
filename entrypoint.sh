@@ -48,4 +48,10 @@ if [ -d "/app/workspace.example" ] && [ -z "$(ls -A /app/workspace 2>/dev/null)"
     echo "Workspace seeded."
 fi
 
+# Seed config defaults if missing
+if [ ! -d "/app/workspace/config" ] && [ -d "/app/workspace.example/config" ]; then
+    echo "Seeding config defaults..."
+    cp -r /app/workspace.example/config /app/workspace/config
+fi
+
 exec "$@"

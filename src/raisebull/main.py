@@ -30,6 +30,7 @@ from raisebull.session import SessionStore
 from raisebull.discord_bot import run_discord_bot, get_bot
 from raisebull.heartbeat import start_heartbeat, run_event_check
 from raisebull.webhook_line import handle_line_message
+from raisebull.admin import create_admin_app
 
 load_dotenv()
 
@@ -108,6 +109,15 @@ async def lifespan(app: FastAPI):
 # ---------------------------------------------------------------------------
 
 app = FastAPI(title="raise-a-bull", version="0.1.0", lifespan=lifespan)
+
+# Mount admin dashboard at module level (route table frozen before lifespan)
+_data_dir = os.getenv("DATA_DIR") or os.getenv("WORKSPACE", "/app/workspace")
+_admin_app = create_admin_app(
+    db_path=os.getenv("CREDENTIALS_DB_PATH", os.path.join(_data_dir, "credentials.db")),
+    workspace_dir=os.getenv("WORKSPACE", "/app/workspace"),
+    bot_fn=get_bot,
+)
+app.mount("/admin", _admin_app)
 
 
 # ---------------------------------------------------------------------------

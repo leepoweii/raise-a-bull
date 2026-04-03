@@ -1,0 +1,47 @@
+<h1 class="page-title">Settings</h1>
+
+<div x-data="settingsPage()" x-init="load()">
+    <div class="card">
+        <div class="settings-form">
+            <div class="form-group">
+                <label>Agent Name</label>
+                <input type="text" x-model="settings.agent_name">
+            </div>
+            <div class="form-group">
+                <label>Model</label>
+                <select x-model="settings.model" style="padding:8px">
+                    <template x-for="m in models" :key="m.id">
+                        <option :value="m.id" x-text="m.name" :selected="m.id === settings.model"></option>
+                    </template>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Max Steps</label>
+                <input type="number" x-model="settings.max_steps">
+                <div class="form-hint">Maximum LLM steps per conversation turn</div>
+            </div>
+            <div class="form-group">
+                <label>Auto Reply Timeout (seconds)</label>
+                <input type="number" x-model="settings.auto_reply_timeout">
+                <div class="form-hint">How long the bot stays in active-reply mode after @mention</div>
+            </div>
+            <div class="form-group">
+                <label>Session Idle Timeout (seconds)</label>
+                <input type="number" x-model="settings.session_idle_timeout">
+                <div class="form-hint">Time before idle sessions are compacted</div>
+            </div>
+            <div class="form-group">
+                <label>Heartbeat Interval (seconds)</label>
+                <input type="number" x-model="settings.heartbeat_interval">
+                <div class="form-hint">How often the heartbeat scheduler pokes the agent</div>
+            </div>
+        </div>
+
+        <button class="btn btn-primary" @click="save()" :disabled="saving"
+                x-text="saving ? 'Saving...' : 'Save'"></button>
+
+        <div class="restart-notice" x-show="saved">
+            Saved. Restart container to apply: <code class="mono">docker compose restart</code>
+        </div>
+    </div>
+</div>

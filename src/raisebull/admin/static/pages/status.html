@@ -1,0 +1,60 @@
+<h1 class="page-title">Status</h1>
+
+<div x-data="statusPage()" x-init="load()">
+    <div class="grid grid-3">
+        <div class="card">
+            <div class="card-title">Agent</div>
+            <div class="card-value" x-text="data.agent_name || '—'"></div>
+            <div class="mono" style="margin-top:4px">
+                <span class="status-dot" :class="data.status === 'ok' ? 'online' : 'offline'"></span>
+                <span x-text="data.status || 'unknown'"></span>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">Discord Bot</div>
+            <div class="card-value" x-text="data.bot_connected ? 'Online' : 'Offline'"></div>
+            <div class="mono" style="margin-top:4px">
+                <span class="status-dot" :class="data.bot_connected ? 'online' : 'offline'"></span>
+                <span x-text="data.bot_connected ? 'connected' : 'disconnected'"></span>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-title">Sessions</div>
+            <div class="card-value" x-text="data.sessions_count ?? '—'"></div>
+        </div>
+    </div>
+
+    <div class="grid grid-3" style="margin-top:16px">
+        <div class="card">
+            <div class="card-title">Skills</div>
+            <div class="card-value" x-text="data.skills_count ?? '—'"></div>
+        </div>
+        <div class="card" style="grid-column: span 2">
+            <div class="card-title">Last Heartbeat</div>
+            <div class="mono" x-text="data.last_heartbeat_time || 'Never'"></div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+        <div class="card-title">MCP Servers</div>
+        <table>
+            <thead><tr><th>Server</th><th>Status</th></tr></thead>
+            <tbody>
+                <template x-for="[name, status] in Object.entries(data.mcp_status || {})">
+                    <tr>
+                        <td class="mono" x-text="name"></td>
+                        <td>
+                            <span class="badge" :class="status === 'connected' ? 'badge-green' : 'badge-red'"
+                                  x-text="status"></span>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+    </div>
+
+    <div style="margin-top:12px;text-align:right;color:var(--ink-muted);font-size:11px">
+        Last refreshed: <span class="mono" x-text="data._lastUpdated || '—'"></span>
+        <span style="margin-left:4px">(auto-refreshes every 30s)</span>
+    </div>
+</div>

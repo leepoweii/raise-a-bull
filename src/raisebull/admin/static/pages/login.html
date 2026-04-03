@@ -1,0 +1,24 @@
+<div class="login-container" x-data="{ password: '', loading: false, error: '' }">
+    <div class="login-box">
+        <div class="login-title">raise-a-calf // login</div>
+        <form @submit.prevent="
+            loading = true; error = '';
+            fetch('/admin/api/auth', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password })
+            }).then(r => {
+                loading = false;
+                if (r.ok) { window.location.hash = '#/status'; }
+                else { error = 'Invalid password'; }
+            }).catch(() => { loading = false; error = 'Connection error'; })
+        ">
+            <input type="password" x-model="password" placeholder="Password"
+                   style="margin-bottom: 16px" autofocus>
+            <button type="submit" class="btn btn-primary" style="width:100%"
+                    :disabled="loading" x-text="loading ? 'Logging in...' : 'LOGIN'">
+            </button>
+            <p x-show="error" x-text="error" style="color:var(--red);margin-top:12px;font-weight:600"></p>
+        </form>
+    </div>
+</div>

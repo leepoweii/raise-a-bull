@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>raise-a-bull // Admin</title>
+    <link rel="stylesheet" href="style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"></script>
+</head>
+<body x-data="app()" x-init="init()">
+    <!-- Mobile header -->
+    <header class="mobile-header">
+        <button class="hamburger" @click="menuOpen = !menuOpen" x-text="menuOpen ? '✕' : '☰'"></button>
+        <span class="mobile-title">raise-a-bull</span>
+    </header>
+
+    <!-- Mobile overlay (closes sidebar when tapping outside) -->
+    <div class="sidebar-overlay" x-show="menuOpen" @click="menuOpen = false"></div>
+
+    <!-- Sidebar -->
+    <nav class="sidebar" :class="{ open: menuOpen }">
+        <div class="sidebar-header">raise-a-bull</div>
+        <div class="sidebar-nav">
+            <a href="#/chat" :class="{ active: page === 'chat' }" @click="go('chat'); menuOpen=false">&#128172; Chat</a>
+            <a href="#/status" :class="{ active: page === 'status' }" @click="go('status'); menuOpen=false">&#9673; Status</a>
+            <a href="#/context" :class="{ active: page === 'context' }" @click="go('context'); menuOpen=false">&#128196; Context</a>
+            <a href="#/skills" :class="{ active: page === 'skills' }" @click="go('skills'); menuOpen=false">&#128736; Skills</a>
+            <a href="#/credentials" :class="{ active: page === 'credentials' }" @click="go('credentials'); menuOpen=false">&#128273; Credentials</a>
+            <a href="#/heartbeat" :class="{ active: page === 'heartbeat' }" @click="go('heartbeat'); menuOpen=false">&#9200; Heartbeat</a>
+            <a href="#/permissions" :class="{ active: page === 'permissions' }" @click="go('permissions'); menuOpen=false">&#128274; Permissions</a>
+            <a href="#/settings" :class="{ active: page === 'settings' }" @click="go('settings'); menuOpen=false">&#9881; Settings</a>
+        </div>
+        <div class="sidebar-footer">
+            <button class="theme-toggle" @click="toggleTheme()" x-text="theme === 'dark' ? '☀️' : '🌙'"></button>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main">
+        <div id="page-content" x-html="pageContent"></div>
+    </main>
+
+    <!-- Toast -->
+    <div class="toast" x-show="toast.show"
+         :class="'toast-' + (toast.type || 'info')"
+         x-transition x-init="$watch('toast.show', v => v && setTimeout(() => toast.show = false, 5000))">
+        <span class="toast-icon" x-text="toast.type === 'success' ? '✓' : toast.type === 'error' ? '✗' : 'ℹ'"></span>
+        <span x-text="toast.msg"></span>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

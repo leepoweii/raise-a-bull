@@ -1,0 +1,75 @@
+<h1 class="page-title">Heartbeat</h1>
+
+<div x-data="heartbeatPage()" x-init="load()">
+    <div style="margin-bottom:16px;display:flex;gap:8px">
+        <button class="btn btn-secondary" @click="editMode = !editMode"
+                x-text="editMode ? 'View Tasks' : 'Edit Markdown'"></button>
+        <button class="btn btn-primary" x-show="editMode" @click="saveMarkdown()" :disabled="saving">
+            Save
+        </button>
+    </div>
+
+    <!-- Task list view -->
+    <div class="card" x-show="!editMode">
+        <table class="desktop-table">
+            <thead>
+                <tr>
+                    <th>Task ID</th>
+                    <th>Schedule</th>
+                    <th>Description</th>
+                    <th>Last Run</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                <template x-for="task in tasks" :key="task.task_id">
+                    <tr class="heartbeat-task-row" :class="{ disabled: !task.enabled }">
+                        <td class="task-id" x-text="task.task_id"></td>
+                        <td class="mono" x-text="task.schedule"></td>
+                        <td x-text="task.description"></td>
+                        <td class="mono" x-text="lastRun[task.task_id] || 'Never'"></td>
+                        <td>
+                            <span class="badge" :class="task.enabled ? 'badge-green' : 'badge-yellow'"
+                                  x-text="task.enabled ? 'Active' : 'Disabled'"></span>
+                        </td>
+                    </tr>
+                </template>
+            </tbody>
+        </table>
+        <div class="mobile-cards">
+            <template x-for="task in tasks" :key="task.task_id">
+                <div class="mobile-card" :style="!task.enabled ? 'opacity:0.5' : ''">
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Task</span>
+                        <span class="mono" x-text="task.task_id"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Schedule</span>
+                        <span class="mono" x-text="task.schedule"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Desc</span>
+                        <span x-text="task.description"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Last Run</span>
+                        <span class="mono" x-text="lastRun[task.task_id] || 'Never'"></span>
+                    </div>
+                    <div class="mobile-card-row">
+                        <span class="mobile-card-label">Status</span>
+                        <span class="badge" :class="task.enabled ? 'badge-green' : 'badge-yellow'"
+                              x-text="task.enabled ? 'Active' : 'Disabled'"></span>
+                    </div>
+                </div>
+            </template>
+        </div>
+        <div x-show="tasks.length === 0" style="padding:16px;color:var(--ink-muted)">
+            No tasks found. Click "Edit Markdown" to add tasks.
+        </div>
+    </div>
+
+    <!-- Raw markdown editor -->
+    <div class="card" x-show="editMode">
+        <textarea x-model="rawMarkdown" style="min-height:500px;font-family:var(--font-mono);font-size:13px;line-height:1.6"></textarea>
+    </div>
+</div>
