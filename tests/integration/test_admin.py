@@ -26,15 +26,18 @@ def admin_app(tmp_path, monkeypatch):
 
 @pytest_asyncio.fixture
 async def client(admin_app):
+    from fastapi import FastAPI
+    parent = FastAPI()
+    parent.mount("/admin", admin_app)
     async with AsyncClient(
-        transport=ASGITransport(app=admin_app),
+        transport=ASGITransport(app=parent),
         base_url="http://test",
     ) as c:
         yield c
 
 
 async def _login(client: AsyncClient) -> AsyncClient:
-    resp = await client.post("/api/auth", json={"password": "testpass123"})
+    resp = await client.post("/admin/api/auth", json={"password": "testpass123"})
     assert resp.status_code == 200
     return client
 
@@ -42,45 +45,25 @@ async def _login(client: AsyncClient) -> AsyncClient:
 class TestAuth:
     @pytest.mark.asyncio
     async def test_login_success(self, client):
-        resp = await client.post("/api/auth", json={"password": "testpass123"})
+        resp = await client.post("/admin/api/auth", json={"password": "testpass123"})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert "rab_session" in resp.cookies
 
     @pytest.mark.asyncio
     async def test_login_wrong_password(self, client):
-        resp = await client.post("/api/auth", json={"password": "wrong"})
+        resp = await client.post("/admin/api/auth", json={"password": "wrong"})
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
     async def test_protected_route_without_auth(self, client):
-        resp = await client.get("/api/context")
+        resp = await client.get("/admin/api/context")
         assert resp.status_code == 401
-
-    @pytest.mark.asyncio
-    async def test_auth_works_when_mounted(self, admin_app, monkeypatch):
-        """Auth middleware must work when sub-app is mounted at /admin/."""
-        from fastapi import FastAPI
-        parent = FastAPI()
-        parent.mount("/admin", admin_app)
-        async with AsyncClient(
-            transport=ASGITransport(app=parent),
-            base_url="http://test",
-        ) as c:
-            # Without auth → 401
-            resp = await c.get("/admin/api/settings")
-            assert resp.status_code == 401
-            # Login → 200
-            resp = await c.post("/admin/api/auth", json={"password": "testpass123"})
-            assert resp.status_code == 200
-            # With cookie → 200
-            resp = await c.get("/admin/api/settings")
-            assert resp.status_code == 200
 
     @pytest.mark.asyncio
     async def test_protected_route_with_auth(self, client):
         await _login(client)
-        resp = await client.get("/api/context")
+        resp = await client.get("/admin/api/context")
         assert resp.status_code == 200
 
 
@@ -88,19 +71,19 @@ class TestContext:
     @pytest.mark.asyncio
     async def test_list_context_empty(self, client):
         await _login(client)
-        resp = await client.get("/api/context")
+        resp = await client.get("/admin/api/context")
         assert resp.status_code == 200
         assert resp.json() == []
 
     @pytest.mark.asyncio
     async def test_write_and_read_context(self, client, admin_app):
         await _login(client)
-        resp = await client.put("/api/context/test.md", json={"content": "# Test\nHello"})
+        resp = await client.put("/admin/api/context/test.md", json={"content": "# Test\nHello"})
         assert resp.status_code == 200
-        resp = await client.get("/api/context/test.md")
+        resp = await client.get("/admin/api/context/test.md")
         assert resp.status_code == 200
         assert resp.json()["content"] == "# Test\nHello"
-        resp = await client.get("/api/context")
+        resp = await client.get("/admin/api/context")
         assert len(resp.json()) == 1
         assert resp.json()[0]["filename"] == "test.md"
 
@@ -109,13 +92,13 @@ class TestContext:
         await _login(client)
         # httpx normalizes ../ in URLs before sending, so traversal never reaches the handler
         # Both 400 (caught by validator) and 404 (route not matched) mean "blocked"
-        resp = await client.get("/api/context/../../../etc/passwd")
+        resp = await client.get("/admin/api/context/../../../etc/passwd")
         assert resp.status_code in (400, 404)
 
     @pytest.mark.asyncio
     async def test_context_non_md_blocked(self, client):
         await _login(client)
-        resp = await client.put("/api/context/test.py", json={"content": "hack"})
+        resp = await client.put("/admin/api/context/test.py", json={"content": "hack"})
         assert resp.status_code == 400
 
 
@@ -123,7 +106,7 @@ class TestSkills:
     @pytest.mark.asyncio
     async def test_list_skills_empty(self, client):
         await _login(client)
-        resp = await client.get("/api/skills")
+        resp = await client.get("/admin/api/skills")
         assert resp.status_code == 200
         assert resp.json() == []
 
@@ -134,12 +117,12 @@ class TestSkills:
         skill_dir = Path(workspace) / "skills" / "test-skill"
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text("# Test Skill")
-        resp = await client.get("/api/skills/test-skill")
+        resp = await client.get("/admin/api/skills/test-skill")
         assert resp.status_code == 200
         assert "# Test Skill" in resp.json()["content"]
-        resp = await client.put("/api/skills/test-skill", json={"content": "# Updated"})
+        resp = await client.put("/admin/api/skills/test-skill", json={"content": "# Updated"})
         assert resp.status_code == 200
-        resp = await client.get("/api/skills/test-skill")
+        resp = await client.get("/admin/api/skills/test-skill")
         assert resp.json()["content"] == "# Updated"
 
 
@@ -147,7 +130,7 @@ class TestHeartbeatViewer:
     @pytest.mark.asyncio
     async def test_get_heartbeat_empty(self, client):
         await _login(client)
-        resp = await client.get("/api/heartbeat")
+        resp = await client.get("/admin/api/heartbeat")
         assert resp.status_code == 200
         assert resp.json()["tasks"] == []
 
@@ -155,9 +138,9 @@ class TestHeartbeatViewer:
     async def test_write_and_read_heartbeat(self, client):
         await _login(client)
         content = "## Daily\n- [morning-report] Check inventory"
-        resp = await client.put("/api/heartbeat", json={"content": content})
+        resp = await client.put("/admin/api/heartbeat", json={"content": content})
         assert resp.status_code == 200
-        resp = await client.get("/api/heartbeat")
+        resp = await client.get("/admin/api/heartbeat")
         data = resp.json()
         assert len(data["tasks"]) == 1
         assert data["tasks"][0]["task_id"] == "morning-report"
@@ -167,25 +150,25 @@ class TestCredentials:
     @pytest.mark.asyncio
     async def test_credentials_crud(self, client):
         await _login(client)
-        resp = await client.post("/api/credentials", json={
+        resp = await client.post("/admin/api/credentials", json={
             "key_name": "TEST_KEY", "key_value": "secret123", "service": "test"
         })
         assert resp.status_code == 200
         cred_id = resp.json()["id"]
-        resp = await client.get("/api/credentials")
+        resp = await client.get("/admin/api/credentials")
         assert resp.status_code == 200
         items = resp.json()
         assert len(items) == 1
         assert "***" in items[0]["key_value"]
-        resp = await client.get(f"/api/credentials/{cred_id}/reveal")
+        resp = await client.get(f"/admin/api/credentials/{cred_id}/reveal")
         assert resp.json()["key_value"] == "secret123"
-        resp = await client.delete(f"/api/credentials/{cred_id}")
+        resp = await client.delete(f"/admin/api/credentials/{cred_id}")
         assert resp.json()["ok"] is True
 
     @pytest.mark.asyncio
     async def test_credentials_test_unknown_key(self, client):
         await _login(client)
-        resp = await client.post("/api/credentials/test", json={
+        resp = await client.post("/admin/api/credentials/test", json={
             "key_name": "UNKNOWN_KEY", "key_value": "xxx"
         })
         assert resp.status_code == 400
@@ -195,7 +178,7 @@ class TestSettings:
     @pytest.mark.asyncio
     async def test_get_settings_defaults(self, client):
         await _login(client)
-        resp = await client.get("/api/settings")
+        resp = await client.get("/admin/api/settings")
         assert resp.status_code == 200
         data = resp.json()
         assert "agent_name" in data
@@ -204,9 +187,9 @@ class TestSettings:
     @pytest.mark.asyncio
     async def test_put_settings(self, client, admin_app):
         await _login(client)
-        resp = await client.put("/api/settings", json={"agent_name": "TestBot", "model": "MiniMax-M2.5"})
+        resp = await client.put("/admin/api/settings", json={"agent_name": "TestBot", "model": "MiniMax-M2.5"})
         assert resp.status_code == 200
-        resp = await client.get("/api/settings")
+        resp = await client.get("/admin/api/settings")
         data = resp.json()
         assert data["agent_name"] == "TestBot"
         assert data["model"] == "MiniMax-M2.5"
@@ -218,7 +201,7 @@ class TestPermissions:
     @pytest.mark.asyncio
     async def test_get_permissions_defaults(self, client):
         await _login(client)
-        resp = await client.get("/api/permissions")
+        resp = await client.get("/admin/api/permissions")
         assert resp.status_code == 200
         data = resp.json()
         assert "role_mappings" in data
@@ -232,9 +215,9 @@ class TestPermissions:
             "role_mappings": [{"discord_role": "Admin", "erp_role": "admin"}],
             "channel_config": [{"channel_name": "general", "role_ceiling": "admin"}],
         }
-        resp = await client.put("/api/permissions", json=new_perms)
+        resp = await client.put("/admin/api/permissions", json=new_perms)
         assert resp.status_code == 200
-        resp = await client.get("/api/permissions")
+        resp = await client.get("/admin/api/permissions")
         data = resp.json()
         assert len(data["role_mappings"]) == 1
         assert data["role_mappings"][0]["discord_role"] == "Admin"
@@ -242,7 +225,7 @@ class TestPermissions:
     @pytest.mark.asyncio
     async def test_discord_roles_no_bot(self, client):
         await _login(client)
-        resp = await client.get("/api/permissions/discord-roles")
+        resp = await client.get("/admin/api/permissions/discord-roles")
         assert resp.status_code == 200
         assert resp.json()["available"] is False
 
@@ -251,7 +234,7 @@ class TestModels:
     @pytest.mark.asyncio
     async def test_list_models_fallback(self, client):
         await _login(client)
-        resp = await client.get("/api/models")
+        resp = await client.get("/admin/api/models")
         assert resp.status_code == 200
         models = resp.json()
         assert len(models) > 0
@@ -265,7 +248,7 @@ class TestModels:
         (config_dir / "models.json").write_text(json.dumps([
             {"id": "custom-model", "name": "Custom Model"},
         ]))
-        resp = await client.get("/api/models")
+        resp = await client.get("/admin/api/models")
         models = resp.json()
         assert len(models) == 1
         assert models[0]["id"] == "custom-model"

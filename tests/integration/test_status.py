@@ -46,18 +46,21 @@ def status_app(tmp_path, monkeypatch, mock_runner, mock_sessions):
 
 @pytest_asyncio.fixture
 async def client(status_app):
+    from fastapi import FastAPI
+    parent = FastAPI()
+    parent.mount("/admin", status_app)
     async with AsyncClient(
-        transport=ASGITransport(app=status_app),
+        transport=ASGITransport(app=parent),
         base_url="http://test",
     ) as c:
-        await c.post("/api/auth", json={"password": "testpass123"})
+        await c.post("/admin/api/auth", json={"password": "testpass123"})
         yield c
 
 
 class TestStatus:
     @pytest.mark.asyncio
     async def test_status_returns_model_and_workspace(self, client):
-        resp = await client.get("/api/status")
+        resp = await client.get("/admin/api/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["model"] == "MiniMax-M2.7"
@@ -68,7 +71,7 @@ class TestStatus:
     async def test_status_session_counts(self, client, mock_sessions):
         await mock_sessions.save("web:abc", session_id="s1", domain="web", token_count=100)
         await mock_sessions.save("discord:123", session_id="s2", domain="general", token_count=200)
-        resp = await client.get("/api/status")
+        resp = await client.get("/admin/api/status")
         data = resp.json()
         assert data["sessions"]["total"] == 2
         assert data["sessions"]["web"] == 1
@@ -76,7 +79,7 @@ class TestStatus:
 
     @pytest.mark.asyncio
     async def test_bootstrap_returns_agent_info(self, client):
-        resp = await client.get("/api/bootstrap")
+        resp = await client.get("/admin/api/bootstrap")
         assert resp.status_code == 200
         data = resp.json()
         assert "agent_name" in data

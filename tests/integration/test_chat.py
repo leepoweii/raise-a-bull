@@ -69,18 +69,21 @@ def chat_app(tmp_path, monkeypatch, mock_runner, mock_sessions):
 
 @pytest_asyncio.fixture
 async def client(chat_app):
+    from fastapi import FastAPI
+    parent = FastAPI()
+    parent.mount("/admin", chat_app)
     async with AsyncClient(
-        transport=ASGITransport(app=chat_app),
+        transport=ASGITransport(app=parent),
         base_url="http://test",
     ) as c:
-        await c.post("/api/auth", json={"password": "testpass123"})
+        await c.post("/admin/api/auth", json={"password": "testpass123"})
         yield c
 
 
 class TestChatSessions:
     @pytest.mark.asyncio
     async def test_create_session(self, client):
-        resp = await client.post("/api/chat/sessions")
+        resp = await client.post("/admin/api/chat/sessions")
         assert resp.status_code == 200
         data = resp.json()
         assert "id" in data
@@ -88,37 +91,37 @@ class TestChatSessions:
 
     @pytest.mark.asyncio
     async def test_list_sessions(self, client):
-        await client.post("/api/chat/sessions")
-        await client.post("/api/chat/sessions")
-        resp = await client.get("/api/chat/sessions")
+        await client.post("/admin/api/chat/sessions")
+        await client.post("/admin/api/chat/sessions")
+        resp = await client.get("/admin/api/chat/sessions")
         assert resp.status_code == 200
         sessions = resp.json()
         assert len(sessions) == 2
 
     @pytest.mark.asyncio
     async def test_delete_session(self, client, mock_sessions):
-        resp = await client.post("/api/chat/sessions")
+        resp = await client.post("/admin/api/chat/sessions")
         sid = resp.json()["id"]
-        resp = await client.delete(f"/api/chat/{sid}")
+        resp = await client.delete(f"/admin/api/chat/{sid}")
         assert resp.json()["ok"] is True
-        resp = await client.get("/api/chat/sessions")
+        resp = await client.get("/admin/api/chat/sessions")
         ids = [s["id"] for s in resp.json()]
         assert sid not in ids
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent_returns_404(self, client):
-        resp = await client.delete("/api/chat/web:nonexistent")
+        resp = await client.delete("/admin/api/chat/web:nonexistent")
         assert resp.status_code == 404
 
 
 class TestChatMessages:
     @pytest.mark.asyncio
     async def test_send_message_sse(self, client):
-        resp = await client.post("/api/chat/sessions")
+        resp = await client.post("/admin/api/chat/sessions")
         sid = resp.json()["id"]
 
         resp = await client.post(
-            f"/api/chat/{sid}/messages",
+            f"/admin/api/chat/{sid}/messages",
             json={"content": "Hello"},
             headers={"Accept": "text/event-stream"},
         )
@@ -138,18 +141,18 @@ class TestChatMessages:
     @pytest.mark.asyncio
     async def test_send_message_to_nonexistent_session(self, client):
         resp = await client.post(
-            "/api/chat/web:nonexistent/messages",
+            "/admin/api/chat/web:nonexistent/messages",
             json={"content": "Hello"},
         )
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
     async def test_session_persists_to_store(self, client, mock_sessions):
-        resp = await client.post("/api/chat/sessions")
+        resp = await client.post("/admin/api/chat/sessions")
         sid = resp.json()["id"]
 
         await client.post(
-            f"/api/chat/{sid}/messages",
+            f"/admin/api/chat/{sid}/messages",
             json={"content": "Hello"},
             headers={"Accept": "text/event-stream"},
         )
@@ -161,7 +164,7 @@ class TestChatMessages:
 
     @pytest.mark.asyncio
     async def test_send_message_stale_session_recovery(self, client, mock_sessions, mock_runner):
-        resp = await client.post("/api/chat/sessions")
+        resp = await client.post("/admin/api/chat/sessions")
         sid = resp.json()["id"]
 
         await mock_sessions.save(sid, session_id="stale-id", domain="web", token_count=0)
@@ -178,7 +181,7 @@ class TestChatMessages:
         mock_runner.run = AsyncMock(side_effect=fake_run_stale)
 
         resp = await client.post(
-            f"/api/chat/{sid}/messages",
+            f"/admin/api/chat/{sid}/messages",
             json={"content": "Hello"},
             headers={"Accept": "text/event-stream"},
         )
