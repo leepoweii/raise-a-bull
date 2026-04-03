@@ -97,41 +97,42 @@ async def test_stale_session_recovery(runner: ClaudeRunner):
     assert result.text or result.error
 
 
-@smoke
-@pytest.mark.asyncio
-async def test_mcp_tavily_search(runner: ClaudeRunner, tmp_path):
-    """MCP connectivity: Tavily search via --mcp-config."""
-    import json as _json
-    import os
-
-    tavily_key = os.environ.get("TAVILY_API_KEY", "")
-    if not tavily_key:
-        pytest.skip("TAVILY_API_KEY not set")
-
-    mcp_config = tmp_path / "mcp-test.json"
-    mcp_config.write_text(_json.dumps({
-        "mcpServers": {
-            "tavily": {
-                "command": "npx",
-                "args": ["-y", "tavily-mcp@0.1.4"],
-                "env": {"TAVILY_API_KEY": tavily_key},
-            }
-        }
-    }))
-
-    r = ClaudeRunner(
-        claude_bin=runner.claude_bin,
-        workspace=str(tmp_path),
-        model=runner.model,
-        mcp_config=str(mcp_config),
-    )
-    result = await r.run(
-        "Use the tavily MCP tool to search for 'MiniMax AI' and summarize in one sentence.",
-        timeout_seconds=120.0,
-    )
-    assert result.error is None or "tavily" not in (result.error or "").lower()
-    if result.text:
-        assert len(result.text) > 10
+# --- Tavily: commented out, may add back as fallback if needed ---
+# @smoke
+# @pytest.mark.asyncio
+# async def test_mcp_tavily_search(runner: ClaudeRunner, tmp_path):
+#     """MCP connectivity: Tavily search via --mcp-config."""
+#     import json as _json
+#     import os
+#
+#     tavily_key = os.environ.get("TAVILY_API_KEY", "")
+#     if not tavily_key:
+#         pytest.skip("TAVILY_API_KEY not set")
+#
+#     mcp_config = tmp_path / "mcp-test.json"
+#     mcp_config.write_text(_json.dumps({
+#         "mcpServers": {
+#             "tavily": {
+#                 "command": "npx",
+#                 "args": ["-y", "tavily-mcp@0.1.4"],
+#                 "env": {"TAVILY_API_KEY": tavily_key},
+#             }
+#         }
+#     }))
+#
+#     r = ClaudeRunner(
+#         claude_bin=runner.claude_bin,
+#         workspace=str(tmp_path),
+#         model=runner.model,
+#         mcp_config=str(mcp_config),
+#     )
+#     result = await r.run(
+#         "Use the tavily MCP tool to search for 'MiniMax AI' and summarize in one sentence.",
+#         timeout_seconds=120.0,
+#     )
+#     assert result.error is None or "tavily" not in (result.error or "").lower()
+#     if result.text:
+#         assert len(result.text) > 10
 
 
 @smoke
