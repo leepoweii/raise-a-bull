@@ -67,6 +67,10 @@ async def lifespan(app: FastAPI):
         model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
     )
 
+    # Inject runner + sessions into admin app (created at module level, populated here)
+    _admin_app.state.runner = _runner
+    _admin_app.state.sessions = _sessions
+
     # Wire heartbeat → Discord push via the bot's channel cache
     async def heartbeat_push(channel_name: str, message: str) -> None:
         bot_instance = get_bot()
