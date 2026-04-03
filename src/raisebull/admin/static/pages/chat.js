@@ -63,7 +63,7 @@ window.chatPage = function() {
                         'Accept': 'text/event-stream',
                     },
                     credentials: 'same-origin',
-                    body: JSON.stringify({ message: msg }),
+                    body: JSON.stringify({ content: msg }),
                 });
 
                 if (resp.status === 401) {
@@ -94,8 +94,7 @@ window.chatPage = function() {
                     }
                 }
 
-                // Reload full history for clean state
-                await this.selectSession(this.currentSession);
+                // Reload session list (names, msg counts) but keep messages in-memory
                 await this.loadSessions();
             } catch (e) {
                 // Restore input on failure so user can retry
