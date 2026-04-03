@@ -32,10 +32,11 @@ class RunResult:
 class ClaudeRunner:
     """Executes `claude -p` and parses its stream-json output."""
 
-    def __init__(self, claude_bin: str = "claude", workspace: str = "", model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, claude_bin: str = "claude", workspace: str = "", model: str = "claude-sonnet-4-6", mcp_config: str = "") -> None:
         self.claude_bin = claude_bin
         self.workspace = workspace
         self.model = model
+        self.mcp_config = mcp_config  # explicit path to MCP config JSON
 
     # ------------------------------------------------------------------
     # Command building
@@ -55,8 +56,8 @@ class ClaudeRunner:
         if session_id:
             cmd += ["--resume", session_id]
 
-        # Load MCP servers from settings.json if mcpServers is configured
-        mcp_config = self._get_mcp_config()
+        # Load MCP servers: explicit path first, then auto-detect from settings.json
+        mcp_config = self.mcp_config or self._get_mcp_config()
         if mcp_config:
             cmd += ["--mcp-config", mcp_config]
 

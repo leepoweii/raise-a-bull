@@ -123,6 +123,7 @@ async def test_mcp_tavily_search(runner: ClaudeRunner, tmp_path):
         claude_bin=runner.claude_bin,
         workspace=str(tmp_path),
         model=runner.model,
+        mcp_config=str(mcp_config),
     )
     result = await r.run(
         "Use the tavily MCP tool to search for 'MiniMax AI' and summarize in one sentence.",
@@ -131,3 +132,105 @@ async def test_mcp_tavily_search(runner: ClaudeRunner, tmp_path):
     assert result.error is None or "tavily" not in (result.error or "").lower()
     if result.text:
         assert len(result.text) > 10
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_mcp_minimax_search(runner: ClaudeRunner, tmp_path):
+    """MCP connectivity: minimax_search (Serper + Jina) via --mcp-config.
+
+    Verifies the search tool returns real Google results for a Chinese query.
+    Requires: SERPER_API_KEY, MINIMAX_API_KEY env vars.
+    Optional: JINA_API_KEY (browse tool needs it, search does not).
+    """
+    import json as _json
+    import os
+
+    serper_key = os.environ.get("SERPER_API_KEY", "")
+    minimax_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    if not serper_key:
+        pytest.skip("SERPER_API_KEY not set")
+    if not minimax_key:
+        pytest.skip("MINIMAX_API_KEY not set")
+
+    mcp_config = tmp_path / "mcp-search.json"
+    mcp_config.write_text(_json.dumps({
+        "mcpServers": {
+            "minimax_search": {
+                "command": "minimax-search",
+                "env": {
+                    "MINIMAX_API_KEY": minimax_key,
+                    "SERPER_API_KEY": serper_key,
+                    "JINA_API_KEY": os.environ.get("JINA_API_KEY", ""),
+                },
+            }
+        }
+    }))
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+        mcp_config=str(mcp_config),
+    )
+
+    # Use explicit tool name to ensure MCP is loaded (not the built-in WebSearch)
+    result = await r.run(
+        "Use the mcp__minimax_search__search tool to search for '金門旅遊'. "
+        "Summarize the top 3 results in one paragraph.",
+        timeout_seconds=120.0,
+    )
+    assert result.error is None, f"Search failed: {result.error}"
+    assert len(result.text) > 20, "Expected meaningful search summary"
+    # Verify it actually searched (should mention travel/tourism related content)
+    assert result.text, "Empty response from search"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_mcp_minimax_browse(runner: ClaudeRunner, tmp_path):
+    """MCP connectivity: minimax_search browse tool reads a web page.
+
+    Requires: SERPER_API_KEY, MINIMAX_API_KEY, JINA_API_KEY env vars.
+    """
+    import json as _json
+    import os
+
+    serper_key = os.environ.get("SERPER_API_KEY", "")
+    minimax_key = os.environ.get("MINIMAX_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+    jina_key = os.environ.get("JINA_API_KEY", "")
+    if not serper_key:
+        pytest.skip("SERPER_API_KEY not set")
+    if not minimax_key:
+        pytest.skip("MINIMAX_API_KEY not set")
+    if not jina_key:
+        pytest.skip("JINA_API_KEY not set")
+
+    mcp_config = tmp_path / "mcp-browse.json"
+    mcp_config.write_text(_json.dumps({
+        "mcpServers": {
+            "minimax_search": {
+                "command": "minimax-search",
+                "env": {
+                    "MINIMAX_API_KEY": minimax_key,
+                    "SERPER_API_KEY": serper_key,
+                    "JINA_API_KEY": jina_key,
+                },
+            }
+        }
+    }))
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+        mcp_config=str(mcp_config),
+    )
+
+    result = await r.run(
+        "Use the mcp__minimax_search__browse tool to read https://example.com "
+        "and tell me the page title and first paragraph.",
+        timeout_seconds=120.0,
+    )
+    assert result.error is None, f"Browse failed: {result.error}"
+    assert len(result.text) > 10, "Expected page content summary"
