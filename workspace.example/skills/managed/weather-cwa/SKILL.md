@@ -1,13 +1,13 @@
 ---
 name: weather-cwa
-description: 金門天氣查詢（中央氣象署 CWA）。查詢金門縣鄉鎮天氣預報。使用時機：問天氣、溫度、會不會下雨、出門要帶傘嗎。優先於內建 weather skill。
+description: 天氣查詢（中央氣象署 CWA）。查詢鄉鎮天氣預報。使用時機：問天氣、溫度、會不會下雨、出門要帶傘嗎。優先於內建 weather skill。
 ---
 
 # weather-cwa
 
-查詢金門縣天氣預報（資料來源：中央氣象署開放資料）。
+查詢天氣預報（資料來源：中央氣象署開放資料）。
 
-**此 skill 優先於內建 weather skill。** 所有金門天氣相關問題都走這裡。
+**此 skill 優先於內建 weather skill。** 所有天氣相關問題都走這裡。
 
 ## 設定
 
@@ -15,23 +15,22 @@ description: 金門天氣查詢（中央氣象署 CWA）。查詢金門縣鄉鎮
 
 | 欄位 | 說明 | 預設值 |
 |---|---|---|
-| `weather.default_location` | 預設查詢鄉鎮 | `金城鎮` |
-| `weather.default_dataset` | 預設資料集 | `F-D0047-085`（2 天預報） |
+| `weather.default_location` | 預設查詢鄉鎮 | （依 params.json 設定） |
+| `weather.default_dataset` | 預設資料集 | （依 params.json 設定，例如 `F-D0047-085`） |
 
 ## 使用方式
 
 用 web_fetch 呼叫中央氣象署 API。環境變數 `CWA_API_KEY` 是授權碼。
 
-### 查詢金門天氣
+### 查詢天氣
 
 ```
 GET https://opendata.cwa.gov.tw/api/v1/rest/datastore/{dataset}?Authorization={CWA_API_KEY}&format=JSON&locationName={location}
 ```
 
-- `F-D0047-085`：金門縣未來 2 天鄉鎮天氣預報
-- `F-D0047-087`：金門縣未來 1 週鄉鎮天氣預報
-- locationName 可選：金城鎮、金湖鎮、金沙鎮、金寧鄉、烈嶼鄉（小金門）
-- **預設查 `params.json` 的 `weather.default_location`**（若無設定，預設金城鎮）
+- dataset ID 和可選的 locationName 由 params.json 的 `weather.default_dataset` 和 `weather.default_location` 決定
+- 參考 CWA 開放資料平台查詢你所在縣市的 dataset ID
+- **預設查 `params.json` 的 `weather.default_location`**
 
 ### 回應解析
 
@@ -60,7 +59,7 @@ GET https://opendata.cwa.gov.tw/api/v1/rest/datastore/{dataset}?Authorization={C
 `「晴。降雨機率0%。溫度攝氏13至15度。寒冷。東北風 平均風速2-3級(每秒5公尺)。相對濕度61至68%。」`
 
 就自然地整理成：
-`「今天金門天氣不錯，晴天，13-15°C，不會下雨。不過東北風有點涼，體感偏冷，提醒大家加件外套。」`
+`「今天天氣不錯，晴天，13-15°C，不會下雨。不過東北風有點涼，體感偏冷，提醒大家加件外套。」`
 
 若「天氣預報綜合描述」缺值，再退回個別欄位（溫度、降雨機率、天氣現象、風速）組合回覆。
 
@@ -93,7 +92,7 @@ GET https://opendata.cwa.gov.tw/api/v1/rest/datastore/{dataset}?Authorization={C
 - API timeout → 「氣象資料暫時無法取得，稍後再試」
 - 401/403 → 「API 授權有問題，請聯絡管理員」
 - 429 → 「查詢太頻繁，稍後再試」
-- 空資料 → 「目前沒有金門的天氣資料」
+- 空資料 → 「目前沒有該地區的天氣資料」
 
 ### 重要規則
 

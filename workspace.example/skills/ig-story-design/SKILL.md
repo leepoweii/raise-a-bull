@@ -7,7 +7,7 @@ description: 生成 IG Story 或 IG Post 設計圖。觸發詞：做限動、IG 
 
 ## 執行流程（照順序，不可跳步）
 
-1. **讀品牌** — `read brand/identity.md`（顏色、字體、logo、風格規則）
+1. **讀品牌** — `read brand/identity.md` if it exists, otherwise use params.json brand settings（顏色、字體、logo、風格規則）
 2. **選模板** — 根據下方選擇表選一個模板
 3. **讀模板** — `read skills/ig-story-design/templates/<模板>.html`
 4. **填內容** — 替換所有 `{{PLACEHOLDER}}`（對照表見 `templates/TEMPLATE-GUIDE.md`）
@@ -63,7 +63,7 @@ IG Post（正方形）：改 `height: 1080`
 ### 步驟三：上傳 CDN
 
 ```bash
-CDN_URL=$(curl -sf -X POST "$AGENTS_INFRA_URL/upload/peili" \
+CDN_URL=$(curl -sf -X POST "$AGENTS_INFRA_URL/upload/{instance_id}" \
   -H "x-api-key: $AGENTS_INFRA_API_KEY" \
   -F "file=@/tmp/story.jpg;filename=ig-$(date +%Y%m%d%H%M%S).jpg" \
   | jq -r '.url')
