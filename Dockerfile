@@ -18,7 +18,7 @@ COPY workspace.example/ /app/workspace.example/
 RUN uv sync --no-dev
 
 # Install minimax_search MCP server (search + browse tools)
-RUN pip install "git+https://github.com/MiniMax-AI/minimax_search.git"
+RUN pip install "https://github.com/MiniMax-AI/minimax_search/archive/refs/heads/main.zip"
 
 RUN mkdir -p /app/data /app/workspace
 
