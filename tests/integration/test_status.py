@@ -84,6 +84,32 @@ class TestStatus:
         assert data["sessions"]["discord"] == 1
 
     @pytest.mark.asyncio
+    async def test_heartbeat_last_reflects_live_module_state(self, client, monkeypatch):
+        """Regression: heartbeat_last must read the LIVE module variable, not an import-time snapshot.
+
+        Previously routes_status.py did `from raisebull.heartbeat import _last_heartbeat_time`
+        which captured None at import time. After heartbeat ticked, the status endpoint still
+        returned None. Fixed by importing the module and accessing the variable dynamically.
+        """
+        import raisebull.heartbeat as hb_mod
+
+        # Initially None
+        resp = await client.get("/admin/api/status")
+        assert resp.json()["heartbeat_last"] is None
+
+        # Simulate a heartbeat tick updating the module variable
+        original = hb_mod._last_heartbeat_time
+        hb_mod._last_heartbeat_time = 1234567890.123
+        try:
+            resp = await client.get("/admin/api/status")
+            assert resp.json()["heartbeat_last"] == 1234567890.123
+
+            resp = await client.get("/admin/api/bootstrap")
+            assert resp.json()["last_heartbeat_time"] == 1234567890.123
+        finally:
+            hb_mod._last_heartbeat_time = original
+
+    @pytest.mark.asyncio
     async def test_bootstrap_returns_agent_info(self, client):
         resp = await client.get("/admin/api/bootstrap")
         assert resp.status_code == 200
