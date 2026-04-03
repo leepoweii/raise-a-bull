@@ -6,8 +6,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from asyncio.subprocess import DEVNULL, PIPE
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from raisebull.trace import TraceStep, parse_stream_event
@@ -52,7 +54,30 @@ class ClaudeRunner:
             cmd += ["--add-dir", self.workspace]
         if session_id:
             cmd += ["--resume", session_id]
+
+        # Load MCP servers from settings.json if mcpServers is configured
+        mcp_config = self._get_mcp_config()
+        if mcp_config:
+            cmd += ["--mcp-config", mcp_config]
+
         return cmd
+
+    @staticmethod
+    def _get_mcp_config() -> Optional[str]:
+        """Extract mcpServers from settings.json into a standalone MCP config file."""
+        settings_path = Path.home() / ".claude" / "settings.json"
+        mcp_path = Path.home() / ".claude" / "mcp.json"
+        if not settings_path.exists():
+            return None
+        try:
+            settings = json.loads(settings_path.read_text())
+            mcp_servers = settings.get("mcpServers")
+            if not mcp_servers:
+                return None
+            mcp_path.write_text(json.dumps({"mcpServers": mcp_servers}, indent=2))
+            return str(mcp_path)
+        except (json.JSONDecodeError, OSError):
+            return None
 
     # ------------------------------------------------------------------
     # Parsing helpers
