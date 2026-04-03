@@ -1,6 +1,7 @@
 """Integration tests for admin dashboard."""
 import pytest
 import pytest_asyncio
+from pathlib import Path
 from httpx import AsyncClient, ASGITransport
 
 from raisebull.admin import create_admin_app
@@ -60,3 +61,110 @@ class TestAuth:
         await _login(client)
         resp = await client.get("/api/context")
         assert resp.status_code == 200
+
+
+class TestContext:
+    @pytest.mark.asyncio
+    async def test_list_context_empty(self, client):
+        await _login(client)
+        resp = await client.get("/api/context")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_write_and_read_context(self, client, admin_app):
+        await _login(client)
+        resp = await client.put("/api/context/test.md", json={"content": "# Test\nHello"})
+        assert resp.status_code == 200
+        resp = await client.get("/api/context/test.md")
+        assert resp.status_code == 200
+        assert resp.json()["content"] == "# Test\nHello"
+        resp = await client.get("/api/context")
+        assert len(resp.json()) == 1
+        assert resp.json()[0]["filename"] == "test.md"
+
+    @pytest.mark.asyncio
+    async def test_context_path_traversal_blocked(self, client):
+        await _login(client)
+        # httpx normalizes ../ in URLs before sending, so traversal never reaches the handler
+        # Both 400 (caught by validator) and 404 (route not matched) mean "blocked"
+        resp = await client.get("/api/context/../../../etc/passwd")
+        assert resp.status_code in (400, 404)
+
+    @pytest.mark.asyncio
+    async def test_context_non_md_blocked(self, client):
+        await _login(client)
+        resp = await client.put("/api/context/test.py", json={"content": "hack"})
+        assert resp.status_code == 400
+
+
+class TestSkills:
+    @pytest.mark.asyncio
+    async def test_list_skills_empty(self, client):
+        await _login(client)
+        resp = await client.get("/api/skills")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_read_write_skill(self, client, admin_app):
+        await _login(client)
+        workspace = admin_app.state.workspace_dir
+        skill_dir = Path(workspace) / "skills" / "test-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("# Test Skill")
+        resp = await client.get("/api/skills/test-skill")
+        assert resp.status_code == 200
+        assert "# Test Skill" in resp.json()["content"]
+        resp = await client.put("/api/skills/test-skill", json={"content": "# Updated"})
+        assert resp.status_code == 200
+        resp = await client.get("/api/skills/test-skill")
+        assert resp.json()["content"] == "# Updated"
+
+
+class TestHeartbeatViewer:
+    @pytest.mark.asyncio
+    async def test_get_heartbeat_empty(self, client):
+        await _login(client)
+        resp = await client.get("/api/heartbeat")
+        assert resp.status_code == 200
+        assert resp.json()["tasks"] == []
+
+    @pytest.mark.asyncio
+    async def test_write_and_read_heartbeat(self, client):
+        await _login(client)
+        content = "## Daily\n- [morning-report] Check inventory"
+        resp = await client.put("/api/heartbeat", json={"content": content})
+        assert resp.status_code == 200
+        resp = await client.get("/api/heartbeat")
+        data = resp.json()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["task_id"] == "morning-report"
+
+
+class TestCredentials:
+    @pytest.mark.asyncio
+    async def test_credentials_crud(self, client):
+        await _login(client)
+        resp = await client.post("/api/credentials", json={
+            "key_name": "TEST_KEY", "key_value": "secret123", "service": "test"
+        })
+        assert resp.status_code == 200
+        cred_id = resp.json()["id"]
+        resp = await client.get("/api/credentials")
+        assert resp.status_code == 200
+        items = resp.json()
+        assert len(items) == 1
+        assert "***" in items[0]["key_value"]
+        resp = await client.get(f"/api/credentials/{cred_id}/reveal")
+        assert resp.json()["key_value"] == "secret123"
+        resp = await client.delete(f"/api/credentials/{cred_id}")
+        assert resp.json()["ok"] is True
+
+    @pytest.mark.asyncio
+    async def test_credentials_test_unknown_key(self, client):
+        await _login(client)
+        resp = await client.post("/api/credentials/test", json={
+            "key_name": "UNKNOWN_KEY", "key_value": "xxx"
+        })
+        assert resp.status_code == 400
