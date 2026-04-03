@@ -41,7 +41,11 @@ def verify_session(request: Request) -> bool:
 
 async def auth_middleware(request: Request, call_next):
     path = request.url.path
-    if path.startswith("/api/") and path != "/api/auth":
+    # Sub-app mounted at /admin/ sees full path: /admin/api/...
+    # Match both /api/... (direct) and /admin/api/... (mounted)
+    is_api = "/api/" in path
+    is_auth = path.endswith("/api/auth")
+    if is_api and not is_auth:
         if not verify_session(request):
             return JSONResponse({"error": "Unauthorized"}, status_code=401)
         response = await call_next(request)
