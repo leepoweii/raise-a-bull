@@ -38,6 +38,7 @@ def create_admin_app(
     from raisebull.admin.routes_settings import router as settings_router
     from raisebull.admin.routes_permissions import router as permissions_router
     from raisebull.admin.routes_models import router as models_router
+    from raisebull.admin.routes_chat import router as chat_router
 
     app.include_router(status_router)
     app.include_router(context_router)
@@ -47,6 +48,7 @@ def create_admin_app(
     app.include_router(settings_router)
     app.include_router(permissions_router)
     app.include_router(models_router)
+    app.include_router(chat_router)
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

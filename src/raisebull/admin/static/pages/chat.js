@@ -40,11 +40,8 @@ window.chatPage = function() {
             this.messages = [];
             this.input = '';
 
-            const data = await this.getApp().api('/api/chat/' + encodeURIComponent(sid));
-            if (Array.isArray(data)) {
-                this.messages = data;
-                this.$nextTick(() => this.scrollToBottom());
-            }
+            // Bull uses Claude Code --resume, no server-side message history
+            this.messages = [];
         },
 
         async send() {
@@ -59,7 +56,7 @@ window.chatPage = function() {
             this.$nextTick(() => this.scrollToBottom());
 
             try {
-                const resp = await fetch('/admin/api/chat/' + encodeURIComponent(this.currentSession), {
+                const resp = await fetch('/admin/api/chat/' + encodeURIComponent(this.currentSession) + '/messages', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -116,16 +113,19 @@ window.chatPage = function() {
             if (event.type === 'thinking') {
                 this.messages.push({ role: 'assistant', thinking: event.content });
             } else if (event.type === 'tool_call') {
+                const c = event.content || {};
                 this.messages.push({
                     role: 'assistant',
-                    tool_calls: [{ name: event.tool_name, arguments: event.tool_args }],
+                    tool_calls: [{ name: c.name, arguments: JSON.stringify(c.input || {}) }],
                 });
             } else if (event.type === 'tool_result') {
-                this.messages.push({ role: 'tool', name: event.tool_name, content: event.content });
-            } else if (event.type === 'response') {
+                this.messages.push({ role: 'tool', content: event.content });
+            } else if (event.type === 'text') {
                 this.messages.push({ role: 'assistant', content: event.content });
             } else if (event.type === 'error') {
                 this.messages.push({ role: 'assistant', content: '⚠️ ' + (event.content || 'Unknown error') });
+            } else if (event.type === 'done') {
+                // Done — no visual action
             }
             this.$nextTick(() => this.scrollToBottom());
         },
