@@ -17,6 +17,24 @@ fi
 # Write MiniMax settings.json if MINIMAX_API_KEY is set (idempotent — overwrites each start)
 if [ -n "$MINIMAX_API_KEY" ]; then
     mkdir -p /home/bull/.claude
+
+    # Build mcpServers block only if SERPER_API_KEY is set
+    if [ -n "$SERPER_API_KEY" ]; then
+        MCP_BLOCK=',
+  "mcpServers": {
+    "minimax_search": {
+      "command": "minimax-search",
+      "env": {
+        "MINIMAX_API_KEY": "'"$MINIMAX_API_KEY"'",
+        "SERPER_API_KEY": "'"$SERPER_API_KEY"'",
+        "JINA_API_KEY": "'"${JINA_API_KEY:-}"'"
+      }
+    }
+  }'
+    else
+        MCP_BLOCK=""
+    fi
+
     cat > /home/bull/.claude/settings.json <<SETTINGS
 {
   "env": {
@@ -28,7 +46,7 @@ if [ -n "$MINIMAX_API_KEY" ]; then
     "ANTHROPIC_SMALL_FAST_MODEL": "$CLAUDE_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "$CLAUDE_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "$CLAUDE_MODEL"
-  }
+  }${MCP_BLOCK}
 }
 SETTINGS
     echo "MiniMax settings.json written."
