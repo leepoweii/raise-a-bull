@@ -1,0 +1,12 @@
+{
+  "role_mappings": [
+    {"discord_role": "Admin", "erp_role": "admin"},
+    {"discord_role": "Manager", "erp_role": "manager"},
+    {"discord_role": "Staff", "erp_role": "staff"}
+  ],
+  "channel_config": [
+    {"channel_name": "management", "role_ceiling": "admin"},
+    {"channel_name": "daily-ops", "role_ceiling": "manager"},
+    {"channel_name": "shipping", "role_ceiling": "staff"}
+  ]
+}

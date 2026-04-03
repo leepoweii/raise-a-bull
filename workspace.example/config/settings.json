@@ -1,0 +1,8 @@
+{
+  "agent_name": "Agent",
+  "model": "MiniMax-M2.7",
+  "max_steps": "100",
+  "auto_reply_timeout": "180",
+  "session_idle_timeout": "1800",
+  "heartbeat_interval": "1800"
+}

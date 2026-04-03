@@ -1,4 +1,5 @@
 """Integration tests for admin dashboard."""
+import json
 import pytest
 import pytest_asyncio
 from pathlib import Path
@@ -168,3 +169,83 @@ class TestCredentials:
             "key_name": "UNKNOWN_KEY", "key_value": "xxx"
         })
         assert resp.status_code == 400
+
+
+class TestSettings:
+    @pytest.mark.asyncio
+    async def test_get_settings_defaults(self, client):
+        await _login(client)
+        resp = await client.get("/api/settings")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "agent_name" in data
+        assert "model" in data
+
+    @pytest.mark.asyncio
+    async def test_put_settings(self, client, admin_app):
+        await _login(client)
+        resp = await client.put("/api/settings", json={"agent_name": "TestBot", "model": "MiniMax-M2.5"})
+        assert resp.status_code == 200
+        resp = await client.get("/api/settings")
+        data = resp.json()
+        assert data["agent_name"] == "TestBot"
+        assert data["model"] == "MiniMax-M2.5"
+        config_path = Path(admin_app.state.workspace_dir) / "config" / "settings.json"
+        assert config_path.exists()
+
+
+class TestPermissions:
+    @pytest.mark.asyncio
+    async def test_get_permissions_defaults(self, client):
+        await _login(client)
+        resp = await client.get("/api/permissions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "role_mappings" in data
+        assert "channel_config" in data
+        assert len(data["role_mappings"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_put_permissions(self, client, admin_app):
+        await _login(client)
+        new_perms = {
+            "role_mappings": [{"discord_role": "Admin", "erp_role": "admin"}],
+            "channel_config": [{"channel_name": "general", "role_ceiling": "admin"}],
+        }
+        resp = await client.put("/api/permissions", json=new_perms)
+        assert resp.status_code == 200
+        resp = await client.get("/api/permissions")
+        data = resp.json()
+        assert len(data["role_mappings"]) == 1
+        assert data["role_mappings"][0]["discord_role"] == "Admin"
+
+    @pytest.mark.asyncio
+    async def test_discord_roles_no_bot(self, client):
+        await _login(client)
+        resp = await client.get("/api/permissions/discord-roles")
+        assert resp.status_code == 200
+        assert resp.json()["available"] is False
+
+
+class TestModels:
+    @pytest.mark.asyncio
+    async def test_list_models_fallback(self, client):
+        await _login(client)
+        resp = await client.get("/api/models")
+        assert resp.status_code == 200
+        models = resp.json()
+        assert len(models) > 0
+        assert any(m["id"] == "MiniMax-M2.7" for m in models)
+
+    @pytest.mark.asyncio
+    async def test_list_models_custom_override(self, client, admin_app):
+        await _login(client)
+        config_dir = Path(admin_app.state.workspace_dir) / "config"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "models.json").write_text(json.dumps([
+            {"id": "custom-model", "name": "Custom Model"},
+        ]))
+        resp = await client.get("/api/models")
+        models = resp.json()
+        assert len(models) == 1
+        assert models[0]["id"] == "custom-model"
