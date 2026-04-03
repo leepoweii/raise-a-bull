@@ -13,6 +13,8 @@ def create_admin_app(
     db_path: str | None = None,
     workspace_dir: str | None = None,
     bot_fn=None,
+    runner=None,
+    sessions=None,
 ) -> FastAPI:
     app = FastAPI(title="raise-a-bull Admin")
 
@@ -20,12 +22,15 @@ def create_admin_app(
     app.state.db_path = db_path or os.path.join(data_dir, "credentials.db")
     app.state.workspace_dir = workspace_dir or os.getenv("WORKSPACE", "/app/workspace")
     app.state.bot_fn = bot_fn
+    app.state.runner = runner
+    app.state.sessions = sessions
 
     init_credentials_db(app.state.db_path)
 
     app.middleware("http")(auth_middleware)
     app.post("/api/auth")(login_endpoint)
 
+    from raisebull.admin.routes_status import router as status_router
     from raisebull.admin.routes_context import router as context_router
     from raisebull.admin.routes_skills import router as skills_router
     from raisebull.admin.routes_heartbeat import router as heartbeat_router
@@ -34,6 +39,7 @@ def create_admin_app(
     from raisebull.admin.routes_permissions import router as permissions_router
     from raisebull.admin.routes_models import router as models_router
 
+    app.include_router(status_router)
     app.include_router(context_router)
     app.include_router(skills_router)
     app.include_router(heartbeat_router)
