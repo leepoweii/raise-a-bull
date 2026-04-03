@@ -97,6 +97,16 @@ class TestChatSessions:
         assert resp.status_code == 200
         sessions = resp.json()
         assert len(sessions) == 2
+        session = sessions[0]
+        assert "id" in session
+        assert "type" in session
+        assert session["type"] == "web"
+        assert "name" in session  # None or str
+        assert "created_at" in session
+        assert "message_count" in session
+        assert "token_count" in session
+        assert isinstance(session["message_count"], int)
+        assert isinstance(session["token_count"], int)
 
     @pytest.mark.asyncio
     async def test_delete_session(self, client, mock_sessions):
@@ -137,6 +147,13 @@ class TestChatMessages:
         assert "thinking" in types
         assert "text" in types
         assert "done" in types
+        done_event = [e for e in events if e["type"] == "done"][0]
+        assert "session_id" in done_event
+        assert "tokens" in done_event
+        assert "in" in done_event["tokens"]
+        assert "out" in done_event["tokens"]
+        assert "error" in done_event
+        assert done_event["error"] is None
 
     @pytest.mark.asyncio
     async def test_send_message_to_nonexistent_session(self, client):

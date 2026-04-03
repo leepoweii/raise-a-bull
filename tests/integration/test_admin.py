@@ -132,7 +132,12 @@ class TestHeartbeatViewer:
         await _login(client)
         resp = await client.get("/admin/api/heartbeat")
         assert resp.status_code == 200
-        assert resp.json()["tasks"] == []
+        data = resp.json()
+        assert "tasks" in data
+        assert "last_run" in data
+        assert "raw_markdown" in data
+        assert data["tasks"] == []
+        assert data["raw_markdown"] == ""
 
     @pytest.mark.asyncio
     async def test_write_and_read_heartbeat(self, client):
@@ -144,6 +149,22 @@ class TestHeartbeatViewer:
         data = resp.json()
         assert len(data["tasks"]) == 1
         assert data["tasks"][0]["task_id"] == "morning-report"
+        assert data["raw_markdown"] == content  # raw markdown preserved
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_roundtrip_raw_markdown(self, client):
+        await _login(client)
+        content = "## Weekly\n- [trends] Update market trends\n<!-- - [disabled-task] This is disabled -->"
+        resp = await client.put("/admin/api/heartbeat", json={"content": content})
+        assert resp.status_code == 200
+        resp = await client.get("/admin/api/heartbeat")
+        data = resp.json()
+        assert data["raw_markdown"] == content
+        assert len(data["tasks"]) == 2
+        assert data["tasks"][0]["task_id"] == "trends"
+        assert data["tasks"][0]["enabled"] is True
+        assert data["tasks"][1]["task_id"] == "disabled-task"
+        assert data["tasks"][1]["enabled"] is False
 
 
 class TestCredentials:
@@ -154,7 +175,14 @@ class TestCredentials:
             "key_name": "TEST_KEY", "key_value": "secret123", "service": "test"
         })
         assert resp.status_code == 200
-        cred_id = resp.json()["id"]
+        # Verify full POST response shape
+        post_data = resp.json()
+        assert "id" in post_data
+        assert "key_name" in post_data
+        assert "service" in post_data
+        assert "created_at" in post_data
+        assert post_data["key_name"] == "TEST_KEY"
+        cred_id = post_data["id"]
         resp = await client.get("/admin/api/credentials")
         assert resp.status_code == 200
         items = resp.json()
@@ -181,8 +209,10 @@ class TestSettings:
         resp = await client.get("/admin/api/settings")
         assert resp.status_code == 200
         data = resp.json()
-        assert "agent_name" in data
-        assert "model" in data
+        expected_keys = {"agent_name", "model", "max_steps", "auto_reply_timeout", "session_idle_timeout", "heartbeat_interval"}
+        assert set(data.keys()) == expected_keys
+        for key, val in data.items():
+            assert isinstance(val, str), f"Setting {key} should be string, got {type(val)}"
 
     @pytest.mark.asyncio
     async def test_put_settings(self, client, admin_app):
@@ -195,6 +225,24 @@ class TestSettings:
         assert data["model"] == "MiniMax-M2.5"
         config_path = Path(admin_app.state.workspace_dir) / "config" / "settings.json"
         assert config_path.exists()
+
+    @pytest.mark.asyncio
+    async def test_settings_put_persists_all_fields(self, client):
+        await _login(client)
+        new_settings = {
+            "agent_name": "TestBot",
+            "model": "MiniMax-M2.5",
+            "max_steps": "50",
+            "auto_reply_timeout": "60",
+            "session_idle_timeout": "900",
+            "heartbeat_interval": "600",
+        }
+        resp = await client.put("/admin/api/settings", json=new_settings)
+        assert resp.status_code == 200
+        resp = await client.get("/admin/api/settings")
+        data = resp.json()
+        for key, expected in new_settings.items():
+            assert data[key] == expected, f"Setting {key}: expected {expected}, got {data[key]}"
 
 
 class TestPermissions:

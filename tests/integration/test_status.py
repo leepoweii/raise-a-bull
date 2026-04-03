@@ -66,6 +66,12 @@ class TestStatus:
         assert data["model"] == "MiniMax-M2.7"
         assert data["workspace"] == "/app/workspace"
         assert data["bot_running"] is False
+        assert "bot_username" in data  # str or None
+        assert "guilds" in data  # int
+        assert "sessions" in data  # dict with total, web, discord, line, heartbeat
+        assert isinstance(data["sessions"], dict)
+        assert all(k in data["sessions"] for k in ("total", "web", "discord", "line", "heartbeat"))
+        assert "heartbeat_last" in data  # None or float
 
     @pytest.mark.asyncio
     async def test_status_session_counts(self, client, mock_sessions):
@@ -85,3 +91,8 @@ class TestStatus:
         assert "agent_name" in data
         assert data["version"] == "0.1.0"
         assert data["bot_connected"] is False
+        assert "accent_color" in data
+        assert "sessions_count" in data
+        assert "last_heartbeat_time" in data
+        assert "status" in data
+        assert data["status"] == "running"
