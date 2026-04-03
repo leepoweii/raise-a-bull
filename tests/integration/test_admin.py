@@ -58,6 +58,26 @@ class TestAuth:
         assert resp.status_code == 401
 
     @pytest.mark.asyncio
+    async def test_auth_works_when_mounted(self, admin_app, monkeypatch):
+        """Auth middleware must work when sub-app is mounted at /admin/."""
+        from fastapi import FastAPI
+        parent = FastAPI()
+        parent.mount("/admin", admin_app)
+        async with AsyncClient(
+            transport=ASGITransport(app=parent),
+            base_url="http://test",
+        ) as c:
+            # Without auth → 401
+            resp = await c.get("/admin/api/settings")
+            assert resp.status_code == 401
+            # Login → 200
+            resp = await c.post("/admin/api/auth", json={"password": "testpass123"})
+            assert resp.status_code == 200
+            # With cookie → 200
+            resp = await c.get("/admin/api/settings")
+            assert resp.status_code == 200
+
+    @pytest.mark.asyncio
     async def test_protected_route_with_auth(self, client):
         await _login(client)
         resp = await client.get("/api/context")
