@@ -24,22 +24,17 @@ Each bot instance is a **workspace** — a directory with an identity, memory, a
     └── workspace/
 ```
 
-Each workspace is self-contained:
+---
 
-```
-workspace/
-├── CLAUDE.md            ← entry point (@includes identity/)
-├── identity/
-│   ├── profile.md       ← who the bot is, personality, tone
-│   ├── context.md       ← background about you and your work
-│   └── expertise.md     ← what this instance specializes in
-├── memory/              ← persistent memory (written by Claude)
-├── skills/              ← loadable skill documents
-└── data/
-    └── sessions.db      ← conversation session cache
-```
+## Features
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
+- **Multi-channel** — Discord + LINE + Web Chat (dashboard), all sharing the same session store
+- **Dashboard** — Admin panel with status, context editor, skills editor, heartbeat viewer, credentials, permissions, and web chat (Alpine.js SPA, neo-brutalism CSS)
+- **MCP Search** — Web search (Google SERP via Serper) + full page reading (Jina Reader), auto-configured when API keys are set
+- **Heartbeat** — Scheduled tasks via APScheduler + user-editable `heartbeat.md`
+- **Memory** — SQLite session store + per-member memory files + daily digests
+- **Skills** — 11 prebuilt skills (calendar, document draft, weather, image generation, IG design, etc.) + extensible with custom skills
+- **Identity** — Layered identity system (managed templates + local customization → compiled IDENTITY.md)
 
 ---
 
@@ -48,7 +43,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
 - **Claude Max** (~$20/mo) — or a MiniMax API key (see below)
 - **LINE Messaging API** account — free tier
 - **Discord** account + bot token — optional, free
-- **A Linux machine** — Mac Mini, always-on server, or Zeabur
+- **A Linux machine** — Mac Mini, always-on server, or cloud VM
 
 ---
 
@@ -56,26 +51,64 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
 
 **Prerequisite:** [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated.
 
-Open a terminal in the repo directory and launch Claude Code:
-
 ```bash
-claude
+# 1. Clone and setup
+git clone https://github.com/leepoweii/raise-a-bull.git
+cd raise-a-bull
+
+# 2. Create your instance
+mkdir -p ~/bots/mybot
+cp .env.example ~/bots/mybot/.env
+cp -r workspace.example/. ~/bots/mybot/workspace/
+
+# 3. Edit .env (add LINE/Discord tokens, set BOT_NAME, BOT_PORT)
+# 4. Edit workspace/identity/ (who your bot is)
+# 5. Edit workspace/USER.md (who you are)
+# 6. Edit workspace/SOUL.md (personality and tone)
+
+# 7. Launch
+docker network create agents-net 2>/dev/null
+BOT_NAME=mybot BOT_PORT=18888 \
+BOT_ENV_FILE=~/bots/mybot/.env \
+WORKSPACE_PATH=~/bots/mybot/workspace \
+docker compose up -d
 ```
 
-Then reference the install guide:
-```
-@docs/install-guide-for-claude.md
-```
-
-Claude will orchestrate the full setup — installing dependencies, guiding account creation, and starting your bot.
-
-> ⚠️ Keep your LINE/Discord tokens in a local notepad. You will enter them securely in the terminal at the end — never paste secrets into the chat.
+> ⚠️ Keep your LINE/Discord tokens in a local notepad. Never paste secrets into chat.
 
 ---
 
-## Optional: Use MiniMax instead of Claude subscription
+## Workspace structure
 
-Set two extra vars in your `.env` to use MiniMax M2.7 (~$0.30/$1.20 per M tokens) instead of Claude Max:
+Each instance gets a full workspace seeded from `workspace.example/`:
+
+```
+workspace/
+├── CLAUDE.md              ← Entry point (@includes identity/)
+├── AGENTS.md              ← Behavior rules, memory system, group chat etiquette
+├── SOUL.md                ← Personality, tone, memory protocol
+├── USER.md                ← About the human owner
+├── IDENTITY.md            ← Auto-compiled from identity/managed/ + identity/local/
+├── brand/identity.md      ← Brand colors, fonts, logo, social handle
+├── config/                ← Agent settings, models, permissions
+├── heartbeat/             ← Scheduled task definitions + run tracker
+├── identity/
+│   ├── managed/           ← Framework-provided templates (facts, tone, local-context)
+│   └── local/             ← Your custom identity files
+├── skills/
+│   ├── managed/ (8)       ← Calendar, document-draft, weather, inbox, etc.
+│   ├── generate-image/    ← HTML → Screenshot → image
+│   ├── ig-story-design/   ← IG Story/Post templates (7 HTML)
+│   ├── user-memory/       ← Per-member memory on compact
+│   └── local/             ← Your custom skills
+└── memory/                ← Created at runtime by the agent
+```
+
+---
+
+## Optional: MiniMax instead of Claude subscription
+
+Set two extra vars in your `.env` to use MiniMax M2.7 (~$0.30/$1.20 per M tokens):
 
 ```env
 MINIMAX_API_KEY=sk-api-...
@@ -86,18 +119,26 @@ The engine writes the necessary config automatically on startup. Get a key at ht
 
 ---
 
-## Adding more instances
+## Optional: Web search (MCP)
 
-```bash
-mkdir -p ~/bots/work
-cp ~/raise-a-bull/.env.example ~/bots/work/.env
-cp -r ~/raise-a-bull/workspace.example/. ~/bots/work/workspace/
-# edit .env (different BOT_NAME and BOT_PORT)
-# edit workspace/identity/
-bash ~/bots/start-bot.sh work
+Add these to your `.env` to enable web search and page reading:
+
+```env
+SERPER_API_KEY=...    # Free: https://serper.dev/signup (2,500 searches)
+JINA_API_KEY=...      # Free: https://jina.ai (10M tokens)
 ```
 
-Each instance gets its own port, its own identity, its own memory, and its own session history.
+The engine auto-configures the `minimax_search` MCP server on startup. Your bot gets two tools:
+- **search** — Google SERP results (batch queries, Chinese-optimized)
+- **browse** — Full page content reading via Jina Reader
+
+---
+
+## Dashboard
+
+Access at `http://localhost:{BOT_PORT}/admin/` (password set via `ADMIN_PASSWORD` env var).
+
+**Pages:** Status, Context Editor, Credentials, Heartbeat, Permissions, Settings, Skills, Chat, Login
 
 ---
 
@@ -111,10 +152,13 @@ Each instance gets its own port, its own identity, its own memory, and its own s
 | `LINE_CHANNEL_ACCESS_TOKEN` | ✅ | From LINE Developers console |
 | `LINE_CHANNEL_SECRET` | ✅ | From LINE Developers console |
 | `CLAUDE_CREDENTIALS` | ✅ | base64 of `~/.claude/.credentials.json` |
+| `ADMIN_PASSWORD` | ✅ | Dashboard login password |
 | `DISCORD_BOT_TOKEN` | optional | Skip if LINE only |
 | `DISCORD_GUILD_ID` | optional | Your Discord server ID |
 | `MINIMAX_API_KEY` | optional | Use MiniMax instead of Claude subscription |
 | `CLAUDE_MODEL` | optional | Model name (default: `claude-sonnet-4-6`) |
+| `SERPER_API_KEY` | optional | Enables MCP web search |
+| `JINA_API_KEY` | optional | Enables MCP page reading |
 
 ---
 
@@ -127,9 +171,26 @@ curl http://localhost:18888/health
 
 ---
 
+## Tests
+
+```bash
+# Fast (unit + integration, ~1s)
+uv run pytest tests/unit/ tests/integration/ -q
+
+# Smoke (real LLM + MCP, ~60s)
+uv run pytest tests/smoke/ -v
+
+# E2E (Playwright, browser)
+npx playwright test
+```
+
+---
+
 ## What this is not
 
 - ❌ Not a hosted service — you own your data and compute
 - ❌ Not model-agnostic — Claude Code only, by design
 - ❌ Not a no-code tool — you edit `identity/`, that's the minimum
 - ❌ Not a replacement for Claude.ai — it's a bot layer, not a chat UI
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
