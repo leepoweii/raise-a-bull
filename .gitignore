@@ -12,3 +12,4 @@ workspace/
 *.sqlite
 .DS_Store
 .env.bak
+node_modules/
