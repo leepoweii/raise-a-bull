@@ -1,0 +1,17 @@
+{
+  "brand": {
+    "name": "Agent",
+    "font_cn": "Noto Sans TC",
+    "location": ""
+  },
+  "weather": {
+    "default_location": "",
+    "dataset": ""
+  },
+  "calendar": {
+    "default_calendar": "primary",
+    "timezone": "Asia/Taipei"
+  },
+  "tasks": {},
+  "timezone": "Asia/Taipei"
+}

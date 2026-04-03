@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0 !important; }
+body { width: 1080px; height: 1920px; overflow: hidden; }
+</style>
+</head>
+<body>
+<div style="position:relative;width:1080px;height:1920px;background:#F3EFE9;font-family:'Noto Sans TC',sans-serif;">
+
+  <!-- 紙張質感 -->
+  <div style="position:absolute;inset:0;opacity:0.05;pointer-events:none;z-index:998;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 600%22%3E%3Cfilter id=%22a%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%22.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23a)%22/%3E%3C/svg%3E');background-repeat:repeat;background-size:200px"></div>
+
+  <!-- 頂部留白區（IG 安全區 250px + 額外空間） -->
+  <div style="height:260px"></div>
+
+  <!-- 週次標題區 -->
+  <div style="padding:0 80px;margin-bottom:12px;">
+    <div style="font-size:20px;font-weight:500;color:#C9821A;letter-spacing:6px;">WEEKLY SCHEDULE</div>
+  </div>
+  <div style="padding:0 80px;margin-bottom:8px;">
+    <h1 style="font-family:'Noto Serif TC',serif;font-size:76px;font-weight:700;color:#1C1208;line-height:1.1;letter-spacing:2px;">本週行程</h1>
+  </div>
+  <div style="padding:0 80px;margin-bottom:28px;">
+    <div style="font-size:40px;font-weight:300;color:#2D2D2D;letter-spacing:4px;">{{WEEK_RANGE}}</div>
+  </div>
+
+  <!-- 金色分隔線 -->
+  <div style="padding:0 80px;margin-bottom:28px;">
+    <div style="height:2px;background:linear-gradient(to right, #C9821A 120px, #D5C9BE 120px);"></div>
+  </div>
+
+  <!-- 圖例 -->
+  <div style="padding:0 80px;margin-bottom:20px;display:flex;gap:32px;">
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:12px;height:12px;background:#C9821A;"></div>
+      <span style="font-size:18px;color:#2D2D2D;">活動</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:12px;height:12px;background:#8B9EB7;"></div>
+      <span style="font-size:18px;color:#2D2D2D;">會議</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <div style="width:12px;height:12px;background:#4A7C59;"></div>
+      <span style="font-size:18px;color:#2D2D2D;">已完成</span>
+    </div>
+  </div>
+
+  <!-- 七日行程列表 -->
+  <div style="padding:0 65px;">
+
+    <!-- Day 1（一） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週一</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_1_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_1_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 2（二） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週二</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_2_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_2_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 3（三） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週三</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_3_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_3_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 4（四） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週四</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_4_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_4_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 5（五） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週五</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_5_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_5_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 6（六） -->
+    <div style="display:flex;border-bottom:1px solid #D5C9BE;padding:14px 15px;align-items:flex-start;background:rgba(28,18,8,0.03);">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週六</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_6_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_6_EVENTS}}</div>
+      </div>
+    </div>
+
+    <!-- Day 7（日） -->
+    <div style="display:flex;padding:14px 15px;align-items:flex-start;background:rgba(28,18,8,0.03);">
+      <div style="width:100px;flex-shrink:0;">
+        <div style="font-family:'Noto Serif TC',serif;font-size:22px;font-weight:700;color:#541E17;letter-spacing:2px;">週日</div>
+        <div style="font-size:28px;font-weight:500;color:#1C1208;">{{DAY_7_DATE}}</div>
+      </div>
+      <div style="flex:1;padding-left:24px;border-left:2px solid #D5C9BE;min-height:52px;display:flex;flex-direction:column;justify-content:center;">
+        <div style="font-size:26px;color:#2D2D2D;line-height:1.6;">{{DAY_7_EVENTS}}</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 底部品牌區 -->
+  <div style="position:absolute;bottom:0;left:0;right:0;height:250px;background:#541E17;padding:50px 80px;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-family:'Noto Serif TC',serif;font-weight:700;font-size:36px;color:#F3EFE9;letter-spacing:4px;">寂寞寂寞山芭地</div>
+      <div style="font-size:16px;color:rgba(243,239,233,0.7);letter-spacing:6px;margin-top:8px;">金門青年培力站</div>
+    </div>
+    <div style="width:2px;height:60px;background:#C9821A;"></div>
+    <div style="text-align:right;">
+      <div style="font-size:20px;color:rgba(243,239,233,0.7);letter-spacing:2px;">Follow us</div>
+      <div style="font-size:24px;color:#F3EFE9;margin-top:4px;">@somebody.kinmen</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

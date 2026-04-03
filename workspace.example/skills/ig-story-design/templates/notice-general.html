@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0 !important; }
+body { width: 1080px; height: 1920px; overflow: hidden; }
+</style>
+</head>
+<body>
+<div style="position:relative;width:1080px;height:1920px;background:#F3EFE9;font-family:'Noto Sans TC',sans-serif;">
+
+  <!-- 紙張質感 -->
+  <div style="position:absolute;inset:0;opacity:0.05;pointer-events:none;z-index:998;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 600%22%3E%3Cfilter id=%22a%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%22.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23a)%22/%3E%3C/svg%3E');background-repeat:repeat;background-size:200px"></div>
+
+  <!-- 頂部酒紅色塊 -->
+  <div style="background:#541E17;padding:280px 80px 60px;">
+    <span style="display:inline-block;padding:8px 28px;border:2px solid #C9821A;font-size:20px;font-weight:500;letter-spacing:6px;color:#C9821A;">{{TAG}}</span>
+    <h1 style="font-family:'Noto Serif TC',serif;font-size:72px;font-weight:700;color:#F3EFE9;line-height:1.2;letter-spacing:2px;margin-top:32px;">{{TITLE}}</h1>
+  </div>
+
+  <!-- 金色裝飾線（分隔） -->
+  <div style="height:4px;background:#C9821A;"></div>
+
+  <!-- 內容區 -->
+  <div style="padding:60px 80px;">
+    <!-- 副標題 -->
+    <p style="font-size:36px;font-weight:500;color:#1C1208;line-height:1.5;margin-bottom:40px;">{{SUBTITLE}}</p>
+
+    <!-- 酒紅分隔線 -->
+    <div style="width:60px;height:4px;background:#541E17;margin-bottom:40px;"></div>
+
+    <!-- 說明文字 -->
+    <p style="font-size:28px;font-weight:400;color:#2D2D2D;line-height:1.8;">{{DESCRIPTION}}</p>
+
+    <!-- 日期（如需要） -->
+    <div style="margin-top:48px;padding:24px 0;border-top:1px solid #D5C9BE;">
+      <div style="font-size:20px;font-weight:500;color:#C9821A;letter-spacing:4px;margin-bottom:8px;">日期</div>
+      <div style="font-size:32px;font-weight:500;color:#1C1208;">{{DATE}}</div>
+    </div>
+  </div>
+
+  <!-- 底部品牌區 -->
+  <div style="position:absolute;bottom:0;left:0;right:0;padding:60px 80px;border-top:1px solid #D5C9BE;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="font-family:'Noto Serif TC',serif;font-weight:700;font-size:32px;color:#541E17;letter-spacing:4px;">寂寞寂寞山芭地</div>
+        <div style="font-size:14px;color:#2D2D2D;letter-spacing:6px;margin-top:4px;">金門青年培力站</div>
+      </div>
+      <div style="font-size:20px;color:#2D2D2D;">@somebody.kinmen</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

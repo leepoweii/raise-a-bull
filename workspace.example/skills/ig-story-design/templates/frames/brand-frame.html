@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Noto+Serif+TC:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0 !important; }
+body { width: 1080px; height: 1920px; overflow: hidden; }
+</style>
+</head>
+<body>
+<div style="position:relative;width:1080px;height:1920px;background:#F3EFE9;font-family:'Noto Sans TC',sans-serif;">
+
+  <!-- 紙張質感 -->
+  <div style="position:absolute;inset:0;opacity:0.05;pointer-events:none;z-index:998;background-image:url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 600 600%22%3E%3Cfilter id=%22a%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%22.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23a)%22/%3E%3C/svg%3E');background-repeat:repeat;background-size:200px"></div>
+
+  <!-- 頂部酒紅邊框 -->
+  <div style="position:absolute;top:0;left:0;right:0;height:6px;background:#541E17;"></div>
+
+  <!-- 底部酒紅邊框 -->
+  <div style="position:absolute;bottom:0;left:0;right:0;height:6px;background:#541E17;"></div>
+
+  <!-- 左側金色裝飾線 -->
+  <div style="position:absolute;left:40px;top:40px;bottom:40px;width:2px;background:#C9821A;"></div>
+
+  <!-- 頂部品牌（安全區內但靠上） -->
+  <div style="position:absolute;top:260px;left:80px;right:80px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-family:'Noto Serif TC',serif;font-weight:700;font-size:24px;color:#541E17;letter-spacing:4px;">寂寞寂寞山芭地</div>
+    <div style="width:40px;height:1px;background:#C9821A;"></div>
+    <div style="font-size:16px;color:#2D2D2D;letter-spacing:4px;">金門青年培力站</div>
+  </div>
+
+  <!-- 🔽 內容放這裡（安全區：top 320px ~ bottom 280px） -->
+  <!-- 使用時在此區域插入主要內容 -->
+
+  <!-- 底部資訊列 -->
+  <div style="position:absolute;bottom:40px;left:80px;right:80px;display:flex;align-items:center;justify-content:space-between;padding-top:16px;border-top:1px solid #D5C9BE;">
+    <div style="font-size:18px;color:#2D2D2D;">@somebody.kinmen</div>
+    <div style="font-size:16px;color:#C9821A;letter-spacing:2px;">KINMEN</div>
+  </div>
+
+</div>
+</body>
+</html>
