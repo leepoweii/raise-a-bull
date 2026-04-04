@@ -1035,19 +1035,350 @@ git commit -m "docs: add GEMINI_API_KEY to .env.example"
 
 ---
 
-## Task 10: Final Integration Test
+## Task 10: Integration Tests (Attachment Processing Flow)
+
+**Files:**
+- Create: `tests/integration/test_attachments.py`
+
+Integration tests verify the full flow: attachment bytes → router → file saved → prompt assembled correctly. Uses mock runner (no real LLM) but real parsers and real filesystem.
+
+- [ ] **Step 1: Write integration tests**
+
+Create `tests/integration/test_attachments.py`:
+
+```python
+"""Integration tests for attachment processing flow.
+
+Tests the full pipeline: bytes → router → saved file → prompt format.
+Uses real parsers and real filesystem, mock runner only.
+"""
+import os
+import io
+import pytest
+import pytest_asyncio
+from raisebull.parsers.router import process_attachment
+from raisebull.parsers.vision import create_vision_client
+
+
+class TestAttachmentFlow:
+    """End-to-end attachment processing without LLM."""
+
+    @pytest.mark.asyncio
+    async def test_text_file_saved_and_readable(self, tmp_path):
+        """Text attachment → saved .txt → content matches."""
+        content = "Meeting notes\n\nDiscussed project timeline."
+        filepath, preview = await process_attachment(
+            content.encode(), "meeting-notes.txt", "text/plain",
+            session_id="discord:123", workspace=str(tmp_path),
+        )
+        assert os.path.isfile(filepath)
+        saved = open(filepath, encoding="utf-8").read()
+        assert "Meeting notes" in saved
+        assert "Discussed project timeline" in saved
+        assert "meeting-notes.txt" in preview[:200]  # or content in preview
+
+    @pytest.mark.asyncio
+    async def test_csv_rendered_as_markdown_table(self, tmp_path):
+        """CSV → markdown table saved to file."""
+        csv_data = "product,price,qty\n高粱酒,580,10\n貢糖,120,25"
+        filepath, preview = await process_attachment(
+            csv_data.encode(), "inventory.csv", "text/csv",
+            session_id="line:Uabc", workspace=str(tmp_path),
+        )
+        saved = open(filepath, encoding="utf-8").read()
+        assert "|" in saved  # markdown table
+        assert "高粱酒" in saved
+        assert "580" in saved
+
+    @pytest.mark.asyncio
+    async def test_docx_paragraphs_and_tables_preserved(self, tmp_path):
+        """DOCX with paragraphs + table → structured text."""
+        from docx import Document
+        doc = Document()
+        doc.add_paragraph("公告事項")
+        table = doc.add_table(rows=2, cols=2)
+        table.cell(0, 0).text = "項目"
+        table.cell(0, 1).text = "金額"
+        table.cell(1, 0).text = "材料費"
+        table.cell(1, 1).text = "5000"
+        buf = io.BytesIO()
+        doc.save(buf)
+        filepath, preview = await process_attachment(
+            buf.getvalue(), "announcement.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            session_id="web:xyz", workspace=str(tmp_path),
+        )
+        saved = open(filepath, encoding="utf-8").read()
+        assert "公告事項" in saved
+        assert "材料費" in saved
+        assert "5000" in saved
+
+    @pytest.mark.asyncio
+    async def test_xlsx_multi_sheet(self, tmp_path):
+        """XLSX with multiple sheets → each rendered as markdown."""
+        import openpyxl
+        wb = openpyxl.Workbook()
+        ws1 = wb.active
+        ws1.title = "Orders"
+        ws1.append(["order_id", "total"])
+        ws1.append(["ORD-001", 1500])
+        ws2 = wb.create_sheet("Products")
+        ws2.append(["name", "price"])
+        ws2.append(["高粱酒", 580])
+        buf = io.BytesIO()
+        wb.save(buf)
+        filepath, _ = await process_attachment(
+            buf.getvalue(), "report.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            session_id="sess", workspace=str(tmp_path),
+        )
+        saved = open(filepath, encoding="utf-8").read()
+        assert "Sheet: Orders" in saved
+        assert "Sheet: Products" in saved
+        assert "高粱酒" in saved
+
+    @pytest.mark.asyncio
+    async def test_pdf_text_extraction(self, tmp_path):
+        """PDF with text → extracted pages."""
+        import fitz
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), "Page 1 content")
+        page2 = doc.new_page()
+        page2.insert_text((72, 72), "Page 2 content")
+        pdf_bytes = doc.tobytes()
+        doc.close()
+        filepath, _ = await process_attachment(
+            pdf_bytes, "report.pdf", "application/pdf",
+            session_id="sess", workspace=str(tmp_path),
+        )
+        saved = open(filepath, encoding="utf-8").read()
+        assert "Page 1 content" in saved
+        assert "Page 2 content" in saved
+
+    @pytest.mark.asyncio
+    async def test_image_without_vision_key(self, tmp_path):
+        """Image without GEMINI_API_KEY → graceful degrade."""
+        # 1x1 white PNG
+        png = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01"
+            b"\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00"
+            b"\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00"
+            b"\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+        filepath, preview = await process_attachment(
+            png, "photo.png", "image/png",
+            session_id="sess", workspace=str(tmp_path),
+            vision_client=None,  # no Gemini key
+        )
+        saved = open(filepath, encoding="utf-8").read()
+        assert "vision" in saved.lower()  # mentions vision unavailable
+
+    @pytest.mark.asyncio
+    async def test_unsupported_format_error(self, tmp_path):
+        """Unsupported file → error message saved."""
+        filepath, preview = await process_attachment(
+            b"\x00\x01\x02", "video.mp4", "video/mp4",
+            session_id="sess", workspace=str(tmp_path),
+        )
+        assert "不支援" in preview
+
+    @pytest.mark.asyncio
+    async def test_session_isolation(self, tmp_path):
+        """Different sessions get different directories."""
+        fp1, _ = await process_attachment(
+            b"content1", "file.txt", "text/plain",
+            session_id="discord:111", workspace=str(tmp_path),
+        )
+        fp2, _ = await process_attachment(
+            b"content2", "file.txt", "text/plain",
+            session_id="line:222", workspace=str(tmp_path),
+        )
+        assert "discord:111" in fp1
+        assert "line:222" in fp2
+        assert fp1 != fp2
+
+    @pytest.mark.asyncio
+    async def test_prompt_format(self, tmp_path):
+        """Verify the prompt format that would be sent to ClaudeRunner."""
+        filepath, preview = await process_attachment(
+            b"Important document content here.",
+            "memo.txt", "text/plain",
+            session_id="sess", workspace=str(tmp_path),
+        )
+        # Simulate prompt assembly (same logic as discord_bot.py / webhook_line.py)
+        prompt = (
+            f"用戶上傳了 memo.txt，已解析存放在：{filepath}\n"
+            f"請用 Read 工具查看完整內容。\n"
+            f"前 200 字預覽：\n{preview}"
+        )
+        assert filepath in prompt
+        assert "Read" in prompt
+        assert "Important document" in prompt
+```
+
+- [ ] **Step 2: Run integration tests**
+
+Run: `uv run pytest tests/integration/test_attachments.py -v`
+Expected: all tests PASS
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/integration/test_attachments.py
+git commit -m "test: add integration tests for attachment processing flow"
+```
+
+---
+
+## Task 11: Smoke Test (Real LLM + Attachment)
+
+**Files:**
+- Modify: `tests/smoke/test_smoke.py`
+
+Smoke test sends a real attachment through ClaudeRunner and verifies Claude can Read the parsed file from workspace/uploads/.
+
+- [ ] **Step 1: Add attachment smoke test**
+
+Append to `tests/smoke/test_smoke.py`:
+
+```python
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a text file → save to workspace → Claude reads it via Read tool.
+
+    Verifies the full attachment pipeline works end-to-end with real LLM.
+    """
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    content = "這是一份測試文件。\n金額：$1,500\n日期：2026-04-04"
+    filepath, preview = await process_attachment(
+        content.encode(), "test-memo.txt", "text/plain",
+        session_id="smoke-test", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個檔案在 {filepath}，用 Read 工具讀取它，告訴我檔案裡的金額是多少。只回答金額數字。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "1,500" in result.text or "1500" in result.text, f"Expected amount in: {result.text}"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_csv_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a CSV → save to workspace → Claude reads and answers."""
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    csv_content = "product,price,qty\n高粱酒,580,10\n貢糖,120,25\n麵線,80,50"
+    filepath, _ = await process_attachment(
+        csv_content.encode(), "products.csv", "text/csv",
+        session_id="smoke-csv", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個 CSV 檔案在 {filepath}，用 Read 工具讀取，告訴我最貴的商品名稱。只回答商品名。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "高粱酒" in result.text, f"Expected 高粱酒 in: {result.text}"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_docx_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a DOCX → save to workspace → Claude reads and summarizes."""
+    import io as _io
+    from docx import Document
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    doc = Document()
+    doc.add_paragraph("會議紀錄")
+    doc.add_paragraph("日期：2026-04-04")
+    doc.add_paragraph("決議：下週三前完成報告。")
+    buf = _io.BytesIO()
+    doc.save(buf)
+
+    filepath, _ = await process_attachment(
+        buf.getvalue(), "meeting.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        session_id="smoke-docx", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個會議紀錄在 {filepath}，用 Read 工具讀取，告訴我決議內容。一句話回答。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "報告" in result.text or "週三" in result.text, f"Expected decision in: {result.text}"
+```
+
+- [ ] **Step 2: Add `import os` at top of test_smoke.py if not present**
+
+Check the existing imports in `test_smoke.py` — add `import os` if missing.
+
+- [ ] **Step 3: Run smoke tests locally**
+
+Run:
+```bash
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
+ANTHROPIC_AUTH_TOKEN=<key> \
+uv run pytest tests/smoke/test_smoke.py::test_attachment_parse_and_read -v
+```
+Expected: PASS (~30s)
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/smoke/test_smoke.py
+git commit -m "test: add smoke tests for attachment parse + LLM Read (3 formats)"
+```
+
+---
+
+## Task 12: Final Verification + Deploy
 
 - [ ] **Step 1: Run all fast tests**
 
 Run: `uv run pytest tests/unit/ tests/integration/ -v`
-Expected: all tests PASS (existing ~70 + new ~50)
+Expected: all tests PASS (existing ~70 + new ~60 = ~130 total)
 
-- [ ] **Step 2: Verify parser count**
+- [ ] **Step 2: Verify parser test count**
 
-Run: `uv run pytest tests/unit/test_parsers_text.py tests/unit/test_parsers_document.py tests/unit/test_invoice.py tests/unit/test_attachment_router.py -v --tb=short`
-Expected: ~50+ tests PASS
+Run: `uv run pytest tests/unit/test_parsers_text.py tests/unit/test_parsers_document.py tests/unit/test_invoice.py tests/unit/test_attachment_router.py tests/integration/test_attachments.py -v --tb=short`
+Expected: ~60+ tests PASS
 
-- [ ] **Step 3: Push and rebuild**
+- [ ] **Step 3: Update CLAUDE.md with new test counts and phase status**
+
+Update the test counts and Phase 3 status in `CLAUDE.md`.
+
+- [ ] **Step 4: Push and rebuild**
 
 ```bash
 git push origin feature/calf-merge
