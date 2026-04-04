@@ -24,6 +24,8 @@ from raisebull.runner import ClaudeRunner, RunResult
 from raisebull.session import SessionStore
 from raisebull.trace import TraceStep
 from raisebull.stream_buffer import CoalesceConfig, StreamBuffer
+from raisebull.parsers.router import process_attachment
+from raisebull.parsers.vision import create_vision_client
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +181,7 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
     guild_ids = [int(guild_id_str)] if guild_id_str else []
 
     channel_states: dict[str, ChannelState] = {}
+    _vision_client = create_vision_client()
 
     @bot.event
     async def on_message(message: discord.Message) -> None:
@@ -204,8 +207,31 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
         prompt = message.content
         if bot.user:
             prompt = prompt.replace(f"<@{bot.user.id}>", "").strip()
-        if not prompt:
+        if not prompt and not message.attachments:
             prompt = "Hello"
+
+        # Process attachments
+        attachment_parts = []
+        for att in message.attachments:
+            try:
+                file_bytes = await att.read()
+                filepath, preview = await process_attachment(
+                    file_bytes, att.filename, att.content_type or "",
+                    session_id=key, workspace=runner.workspace,
+                    vision_client=_vision_client,
+                )
+                attachment_parts.append(
+                    f"用戶上傳了 {att.filename}，已解析存放在：{filepath}\n"
+                    f"請用 Read 工具查看完整內容。\n"
+                    f"前 200 字預覽：\n{preview}"
+                )
+            except Exception:
+                logger.exception("Failed to process attachment %s", att.filename)
+                attachment_parts.append(f"(附件 {att.filename} 處理失敗)")
+
+        if attachment_parts:
+            prompt = "\n\n---\n\n".join(attachment_parts) + "\n\n" + (prompt or "")
+            prompt = prompt.strip()
 
         session = await sessions.get(key)
         session_id: Optional[str] = session["session_id"] if session else None
