@@ -927,8 +927,15 @@ async def handle_line_attachment(
     blob_api,
 ) -> None:
     """Handle image/file attachments from LINE."""
-    user_id: str = event.source.user_id
-    session_key, _, chat_id = _resolve_context(event)
+    # Cannot use _resolve_context() — image/file messages have no .text attribute
+    source = event.source
+    user_id: str = source.user_id
+    if source.type == "group":
+        session_key = f"line:group:{source.group_id}"
+        chat_id = source.group_id
+    else:
+        session_key = f"line:{user_id}"
+        chat_id = user_id
 
     # Download content from LINE
     try:
@@ -936,11 +943,12 @@ async def handle_line_attachment(
         content_response = blob_api.get_message_content(message_id)
         file_bytes = content_response
 
-        # Determine filename and content type
+        # Determine filename — LINE does not provide MIME type,
+        # so router will fall back to extension-based classification.
         msg = event.message
         if hasattr(msg, "file_name") and msg.file_name:
             filename = msg.file_name
-            content_type = getattr(msg, "content_type", "") or ""
+            content_type = ""  # LINE FileMessageContent has no content_type field
         else:
             # Image message — no filename, use message_id
             filename = f"{message_id}.jpg"
@@ -959,8 +967,7 @@ async def handle_line_attachment(
         filepath, preview = await process_attachment(
             file_bytes, filename, content_type,
             session_id=session_key,
-            workspace=os.path.dirname(os.path.dirname(__file__)) + "/../workspace"
-                if not os.environ.get("WORKSPACE") else os.environ["WORKSPACE"],
+            workspace=runner.workspace,
             vision_client=_vision_client_line,
         )
 
