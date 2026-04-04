@@ -2,27 +2,30 @@
 
 import asyncio
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
 
+from raisebull.parsers.router import process_attachment
+from raisebull.parsers.vision import create_vision_client
 from raisebull.trace import TraceStep
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 _web_sessions: dict[str, dict[str, Any]] = {}
 
+_vision_client = create_vision_client()
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
 
 def _generate_id() -> str:
     return f"web:{secrets.token_hex(6)}"
-
-
-class MessageBody(BaseModel):
-    content: str
 
 
 @router.post("/api/chat/sessions")
@@ -94,7 +97,7 @@ async def delete_session(session_id: str, request: Request):
 
 
 @router.post("/api/chat/{session_id}/messages")
-async def send_message(session_id: str, body: MessageBody, request: Request):
+async def send_message(session_id: str, request: Request):
     if session_id not in _web_sessions:
         return JSONResponse({"error": "session not found"}, status_code=404)
 
@@ -103,6 +106,71 @@ async def send_message(session_id: str, body: MessageBody, request: Request):
 
     if runner is None:
         return JSONResponse({"error": "no runner"}, status_code=503)
+
+    # Parse request: multipart/form-data or JSON
+    content_type = request.headers.get("content-type", "")
+    content = ""
+    attachment_parts: list[str] = []
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        content = (form.get("content") or "").strip()
+        file_fields = form.getlist("files")
+
+        # Validate file count
+        if len(file_fields) > 5:
+            return JSONResponse({"error": "too many files (max 5)"}, status_code=400)
+
+        # Validate each file size
+        for upload in file_fields:
+            file_bytes = await upload.read()
+            if len(file_bytes) > MAX_FILE_SIZE:
+                return JSONResponse(
+                    {"error": f"file too large: {upload.filename}"},
+                    status_code=413,
+                )
+            filepath, preview = await process_attachment(
+                file_bytes=file_bytes,
+                filename=upload.filename or "upload",
+                content_type=upload.content_type or "",
+                session_id=session_id,
+                workspace=runner.workspace,
+                vision_client=_vision_client,
+            )
+            attachment_parts.append(
+                f"[Attachment: {upload.filename}]\n"
+                f"Read the full content from: {filepath}\n"
+                f"Preview: {preview}"
+            )
+
+        # Require at least one of content or files
+        if not content and not attachment_parts:
+            return JSONResponse(
+                {"error": "content or files required"},
+                status_code=400,
+            )
+    elif "application/x-www-form-urlencoded" in content_type:
+        # urlencoded form without files — treat empty content as invalid
+        form = await request.form()
+        content = (form.get("content") or "").strip()
+        if not content:
+            return JSONResponse(
+                {"error": "content or files required"},
+                status_code=400,
+            )
+    else:
+        # JSON body
+        try:
+            body = await request.json()
+            content = body.get("content", "").strip()
+        except Exception:
+            content = ""
+
+    # Build combined prompt
+    parts = attachment_parts[:]
+    if content:
+        parts.append(content)
+    prompt = "\n\n---\n\n".join(parts) if parts else content
 
     claude_session_id = None
     if sessions_store:
@@ -123,7 +191,7 @@ async def send_message(session_id: str, body: MessageBody, request: Request):
         async def run_agent():
             try:
                 result = await runner.run(
-                    body.content,
+                    prompt,
                     session_id=claude_session_id,
                     on_trace=on_trace,
                     timeout_seconds=300.0,
@@ -131,7 +199,7 @@ async def send_message(session_id: str, body: MessageBody, request: Request):
                 if result.stale_session and sessions_store:
                     await sessions_store.clear(session_id)
                     result = await runner.run(
-                        body.content,
+                        prompt,
                         session_id=None,
                         on_trace=on_trace,
                         timeout_seconds=300.0,
@@ -180,6 +248,6 @@ async def send_message(session_id: str, body: MessageBody, request: Request):
         if meta:
             meta["message_count"] = meta.get("message_count", 0) + 1
             if meta.get("name") is None:
-                meta["name"] = body.content[:20]
+                meta["name"] = (content or "file upload")[:20]
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

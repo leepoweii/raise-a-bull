@@ -21,6 +21,7 @@ dependencies = [
     "pycryptodomex>=3.20",
     "pyzbar>=0.1.9",
     "openai>=1.50",
+    "python-multipart>=0.0.9",
 ]
 
 [build-system]

@@ -209,3 +209,84 @@ class TestChatMessages:
         assert "done" in types
         row = await mock_sessions.get(sid)
         assert row["session_id"] == "new-sess"
+
+
+class TestChatFileUpload:
+    @pytest.mark.asyncio
+    async def test_send_message_with_file(self, client, mock_runner, tmp_path):
+        """Upload a .txt file → file saved + SSE streams."""
+        resp = await client.post("/admin/api/chat/sessions")
+        sid = resp.json()["id"]
+
+        resp = await client.post(
+            f"/admin/api/chat/{sid}/messages",
+            data={"content": ""},
+            files={"files": ("test.txt", b"Hello from file", "text/plain")},
+            headers={"Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+        call_args = mock_runner.run.call_args
+        prompt = call_args.kwargs.get("prompt") or call_args[0][0]
+        assert "test.txt" in prompt
+        assert "Read" in prompt
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_file_and_text(self, client, mock_runner):
+        """Upload file + text → both appear in prompt."""
+        resp = await client.post("/admin/api/chat/sessions")
+        sid = resp.json()["id"]
+
+        resp = await client.post(
+            f"/admin/api/chat/{sid}/messages",
+            data={"content": "請分析這個檔案"},
+            files={"files": ("data.csv", b"name,age\nAlice,30", "text/csv")},
+            headers={"Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 200
+        call_args = mock_runner.run.call_args
+        prompt = call_args.kwargs.get("prompt") or call_args[0][0]
+        assert "data.csv" in prompt
+        assert "請分析這個檔案" in prompt
+
+    @pytest.mark.asyncio
+    async def test_send_message_file_too_large(self, client):
+        """File > 10MB → 413."""
+        resp = await client.post("/admin/api/chat/sessions")
+        sid = resp.json()["id"]
+
+        big_content = b"x" * (10 * 1024 * 1024 + 1)
+        resp = await client.post(
+            f"/admin/api/chat/{sid}/messages",
+            data={"content": ""},
+            files={"files": ("big.txt", big_content, "text/plain")},
+        )
+        assert resp.status_code == 413
+
+    @pytest.mark.asyncio
+    async def test_send_message_no_content_no_files(self, client):
+        """Empty multipart request (no content, no files) → 400."""
+        resp = await client.post("/admin/api/chat/sessions")
+        sid = resp.json()["id"]
+
+        resp = await client.post(
+            f"/admin/api/chat/{sid}/messages",
+            data={"content": ""},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_send_message_json_still_works(self, client, mock_runner):
+        """JSON body without files → still works (backward compat)."""
+        resp = await client.post("/admin/api/chat/sessions")
+        sid = resp.json()["id"]
+
+        resp = await client.post(
+            f"/admin/api/chat/{sid}/messages",
+            json={"content": "Hello JSON"},
+            headers={"Accept": "text/event-stream"},
+        )
+        assert resp.status_code == 200
+        events = [json.loads(line[6:]) for line in resp.text.split("\n") if line.startswith("data: ")]
+        types = [e["type"] for e in events]
+        assert "done" in types
