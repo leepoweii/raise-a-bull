@@ -235,3 +235,96 @@ async def test_mcp_minimax_browse(runner: ClaudeRunner, tmp_path):
     )
     assert result.error is None, f"Browse failed: {result.error}"
     assert len(result.text) > 10, "Expected page content summary"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a text file → save to workspace → Claude reads it via Read tool."""
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    content = "這是一份測試文件。\n金額：$1,500\n日期：2026-04-04"
+    filepath, preview = await process_attachment(
+        content.encode(), "test-memo.txt", "text/plain",
+        session_id="smoke-test", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個檔案在 {filepath}，用 Read 工具讀取它，告訴我檔案裡的金額是多少。只回答金額數字。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "1,500" in result.text or "1500" in result.text, f"Expected amount in: {result.text}"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_csv_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a CSV → save to workspace → Claude reads and answers."""
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    csv_content = "product,price,qty\n高粱酒,580,10\n貢糖,120,25\n麵線,80,50"
+    filepath, _ = await process_attachment(
+        csv_content.encode(), "products.csv", "text/csv",
+        session_id="smoke-csv", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個 CSV 檔案在 {filepath}，用 Read 工具讀取，告訴我最貴的商品名稱。只回答商品名。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "高粱酒" in result.text, f"Expected 高粱酒 in: {result.text}"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_attachment_docx_parse_and_read(runner: ClaudeRunner, tmp_path):
+    """Smoke: parse a DOCX → save to workspace → Claude reads and summarizes."""
+    import io as _io
+    from docx import Document
+    from raisebull.parsers.router import process_attachment
+
+    workspace = str(tmp_path)
+    doc = Document()
+    doc.add_paragraph("會議紀錄")
+    doc.add_paragraph("日期：2026-04-04")
+    doc.add_paragraph("決議：下週三前完成報告。")
+    buf = _io.BytesIO()
+    doc.save(buf)
+
+    filepath, _ = await process_attachment(
+        buf.getvalue(), "meeting.docx",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        session_id="smoke-docx", workspace=workspace,
+    )
+    assert os.path.exists(filepath)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=workspace,
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(
+        f"有一個會議紀錄在 {filepath}，用 Read 工具讀取，告訴我決議內容。一句話回答。",
+        timeout_seconds=60.0,
+    )
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "報告" in result.text or "週三" in result.text, f"Expected decision in: {result.text}"
