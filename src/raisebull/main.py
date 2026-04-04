@@ -20,8 +20,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response
 from linebot.v3 import WebhookParser
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import ApiClient, Configuration, MessagingApi
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.messaging import ApiClient, Configuration, MessagingApi, MessagingApiBlob
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageContent, FileMessageContent
 
 import discord
 
@@ -29,7 +29,7 @@ from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
 from raisebull.discord_bot import run_discord_bot, get_bot
 from raisebull.heartbeat import start_heartbeat, run_event_check
-from raisebull.webhook_line import handle_line_message
+from raisebull.webhook_line import handle_line_message, handle_line_attachment
 from raisebull.admin import create_admin_app
 
 load_dotenv()
@@ -181,12 +181,17 @@ async def webhook_line(request: Request) -> Response:
         configuration = Configuration(access_token=access_token)
         with ApiClient(configuration) as api_client:
             messaging_api = MessagingApi(api_client)
+            blob_api = MessagingApiBlob(api_client)
             for event in events:
-                if isinstance(event, MessageEvent) and isinstance(
-                    event.message, TextMessageContent
-                ):
+                if not isinstance(event, MessageEvent):
+                    continue
+                if isinstance(event.message, TextMessageContent):
                     await handle_line_message(
                         event, _runner, _sessions, messaging_api
+                    )
+                elif isinstance(event.message, (ImageMessageContent, FileMessageContent)):
+                    await handle_line_attachment(
+                        event, _runner, _sessions, messaging_api, blob_api
                     )
 
     asyncio.create_task(_process())

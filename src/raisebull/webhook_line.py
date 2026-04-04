@@ -249,3 +249,83 @@ def push_to_line(text: str, messaging_api: "MessagingApi") -> None:
             messages=[TextMessage(text=text)],
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Attachment handler
+# ---------------------------------------------------------------------------
+
+from raisebull.parsers.router import process_attachment
+from raisebull.parsers.vision import create_vision_client
+
+_vision_client_line = create_vision_client()
+
+
+async def handle_line_attachment(
+    event: "MessageEvent",
+    runner: "ClaudeRunner",
+    sessions: "SessionStore",
+    messaging_api: "MessagingApi",
+    blob_api,
+) -> None:
+    """Handle image/file attachments from LINE."""
+    # Cannot use _resolve_context() — image/file messages have no .text attribute
+    source = event.source
+    user_id: str = source.user_id
+    if source.type == "group":
+        session_key = f"line:group:{source.group_id}"
+        chat_id = source.group_id
+    else:
+        session_key = f"line:{user_id}"
+        chat_id = user_id
+
+    # Download content from LINE
+    try:
+        message_id = event.message.id
+        content_response = blob_api.get_message_content(message_id)
+        file_bytes = content_response
+
+        # Determine filename — LINE does not provide MIME type,
+        # so router will fall back to extension-based classification.
+        msg = event.message
+        if hasattr(msg, "file_name") and msg.file_name:
+            filename = msg.file_name
+            content_type = ""  # LINE FileMessageContent has no content_type field
+        else:
+            # Image message — no filename, use message_id
+            filename = f"{message_id}.jpg"
+            content_type = "image/jpeg"
+
+    except Exception:
+        logger.exception("Failed to download LINE content %s", event.message.id)
+        _send(chat_id, event.reply_token, "⚠️ 無法下載附件", messaging_api)
+        return
+
+    # Process attachment
+    try:
+        filepath, preview = await process_attachment(
+            file_bytes, filename, content_type,
+            session_id=session_key,
+            workspace=runner.workspace,
+            vision_client=_vision_client_line,
+        )
+
+        prompt = (
+            f"用戶上傳了 {filename}，已解析存放在：{filepath}\n"
+            f"請用 Read 工具查看完整內容。\n"
+            f"前 200 字預覽：\n{preview}"
+        )
+
+        await _process_message(
+            prompt=prompt,
+            session_key=session_key,
+            chat_id=chat_id,
+            user_id=user_id,
+            reply_token=event.reply_token,
+            runner=runner,
+            sessions=sessions,
+            messaging_api=messaging_api,
+        )
+    except Exception:
+        logger.exception("Failed to process LINE attachment")
+        _send(chat_id, event.reply_token, "⚠️ 附件處理失敗", messaging_api)
