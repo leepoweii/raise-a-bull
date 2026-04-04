@@ -13,3 +13,7 @@ workspace/
 .DS_Store
 .env.bak
 node_modules/
+test-results/
+.claude/
+package-lock.json
+package.json
