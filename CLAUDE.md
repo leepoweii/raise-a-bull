@@ -40,6 +40,7 @@ main.py (single process, asyncio.gather)
 | HTTP | FastAPI |
 | Channels | Discord + LINE + Web Chat |
 | MCP Search | minimax_search (Serper Google SERP + Jina Reader) |
+| Multimodal | Parsers (text/doc/PDF/XLSX/PPTX) + Gemini Vision + QR/Invoice |
 | Dashboard | FastAPI + Alpine.js (neo-brutalism CSS) |
 | Database | SQLite (sessions, credentials) |
 | Deploy | Docker Compose |
@@ -57,6 +58,13 @@ src/raisebull/
 ├── stream_buffer.py     — SSE streaming buffer
 ├── trace.py             — TraceStep parser (thinking/tool_call/tool_result)
 ├── setup_rich_menu.py   — LINE Rich Menu setup
+├── parsers/             — Multimodal attachment parsers
+│   ├── text.py          — Plain text + CSV → text
+│   ├── document.py      — PDF, DOCX, XLSX, PPTX → markdown
+│   ├── vision.py        — Image → Gemini Vision → text description
+│   ├── invoice.py       — Taiwan e-invoice QR AES decryption
+│   ├── qrcode.py        — QR code scanning + dispatch
+│   └── router.py        — MIME classify → parse → save workspace/uploads/
 └── admin/               — Dashboard (9 pages)
     ├── auth.py, crud.py, credentials_db.py
     ├── routes_*.py      — 9 route modules (status, chat, context, skills...)
@@ -144,11 +152,13 @@ npx playwright test
 
 ```
 tests/
-├── unit/           — 4 files (trace, heartbeat_parse, stream_buffer, three_tier)
-├── integration/    — 3 files (admin, chat, status)
-├── smoke/          — 2 files (basic LLM + MCP search/browse)
+├── unit/           — 8 files (trace, heartbeat, stream_buffer, three_tier,
+│                     parsers_text, parsers_document, invoice, attachment_router)
+├── integration/    — 4 files (admin, chat, status, attachments)
+├── smoke/          — 2 files (LLM basic + MCP search + attachment parse/read)
 ├── e2e/            — Playwright (11 dashboard tests)
 └── root            — 5 files (runner, session, discord_bot, main, recovery)
+Total: ~130 fast + 12 smoke + 11 e2e
 ```
 
 ---
@@ -162,6 +172,8 @@ tests/
 - **workspace.example** — fully templatized, zero instance-specific content; new instances seed from here
 - **Dashboard auth** — ADMIN_PASSWORD env var → HMAC cookie (httponly, 24hr)
 - **LINE webhook** — `asyncio.create_task` for background processing, reply_token → push fallback
+- **Multimodal parsers** — attachments parsed → text saved to `workspace/uploads/{session_id}/` → prompt gives path → Claude Code Read tool accesses on demand
+- **Vision graceful degrade** — no GEMINI_API_KEY → images get QR scan only, skip description; no pyzbar → skip QR scan
 
 ---
 
@@ -181,3 +193,4 @@ tests/
 | `CLAUDE_MODEL` | optional | Default: `claude-sonnet-4-6` |
 | `SERPER_API_KEY` | optional | Enables MCP search (free: serper.dev/signup) |
 | `JINA_API_KEY` | optional | Enables MCP browse (free: jina.ai) |
+| `GEMINI_API_KEY` | optional | Enables image vision (free: aistudio.google.com/apikey) |

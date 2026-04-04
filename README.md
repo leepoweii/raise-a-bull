@@ -29,6 +29,8 @@ Each bot instance is a **workspace** — a directory with an identity, memory, a
 ## Features
 
 - **Multi-channel** — Discord + LINE + Web Chat (dashboard), all sharing the same session store
+- **Multimodal attachments** — Discord/LINE images, PDFs, DOCX, XLSX, PPTX, CSV parsed into text, saved to workspace, Claude reads on demand via Read tool
+- **Image vision** — Gemini Flash describes images (receipts, documents, photos) in Chinese; QR codes auto-decoded including Taiwan e-invoices
 - **Dashboard** — Admin panel with status, context editor, skills editor, heartbeat viewer, credentials, permissions, and web chat (Alpine.js SPA, neo-brutalism CSS)
 - **MCP Search** — Web search (Google SERP via Serper) + full page reading (Jina Reader), auto-configured when API keys are set
 - **Heartbeat** — Scheduled tasks via APScheduler + user-editable `heartbeat.md`
@@ -134,6 +136,18 @@ The engine auto-configures the `minimax_search` MCP server on startup. Your bot 
 
 ---
 
+## Optional: Image vision (Gemini)
+
+Add to your `.env` to enable image description for photo attachments:
+
+```env
+GEMINI_API_KEY=...    # Free: https://aistudio.google.com/apikey
+```
+
+Without this key, images are still processed for QR codes (including Taiwan e-invoices), but no visual description is generated.
+
+---
+
 ## Dashboard
 
 Access at `http://localhost:{BOT_PORT}/admin/` (password set via `ADMIN_PASSWORD` env var).
@@ -159,6 +173,7 @@ Access at `http://localhost:{BOT_PORT}/admin/` (password set via `ADMIN_PASSWORD
 | `CLAUDE_MODEL` | optional | Model name (default: `claude-sonnet-4-6`) |
 | `SERPER_API_KEY` | optional | Enables MCP web search |
 | `JINA_API_KEY` | optional | Enables MCP page reading |
+| `GEMINI_API_KEY` | optional | Enables image vision (Gemini Flash) |
 
 ---
 
