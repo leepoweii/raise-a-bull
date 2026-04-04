@@ -17,9 +17,11 @@
 ### Files to modify
 | File | Changes |
 |------|---------|
+| `pyproject.toml` | Add `python-multipart` dependency (required by FastAPI for form/file uploads) |
 | `src/raisebull/admin/routes_chat.py` | Split `send_message` into JSON + multipart handler, add file processing |
 | `src/raisebull/admin/static/pages/chat.html` | Add drag-and-drop overlay, file preview bar, update input area |
 | `src/raisebull/admin/static/pages/chat.js` | Rewrite `send()` to use FormData when files present, add drop handlers, file state |
+| `src/raisebull/admin/static/style.css` | Add file preview + drop overlay CSS |
 | `tests/integration/test_chat.py` | Add 5 new test cases for file upload |
 
 ---
@@ -118,6 +120,10 @@ class TestChatFileUpload:
         assert "done" in types
 ```
 
+- [ ] **Step 1b: Add python-multipart dependency**
+
+Add `"python-multipart>=0.0.9"` to `pyproject.toml` dependencies (required by FastAPI for form/file upload parsing). Then run `uv sync`.
+
 - [ ] **Step 2: Run tests — verify new tests fail**
 
 Run: `cd /Users/pwlee/Documents/Github/raise-a-bull && uv run pytest tests/integration/test_chat.py::TestChatFileUpload -v`
@@ -172,6 +178,9 @@ async def send_message(session_id: str, request: Request):
     content = (content or "").strip()
     if not content and not files:
         return JSONResponse({"error": "content or files required"}, status_code=400)
+
+    if len(files) > 5:
+        return JSONResponse({"error": "max 5 files per message"}, status_code=400)
 
     # Process file attachments
     attachment_parts = []
@@ -317,7 +326,7 @@ Replace the entire `chat-input-area` section (lines 122-139) with:
 
 ```html
                     <!-- File preview bar (shows when files are pending) -->
-                    <div class="chat-file-preview" x-show="pendingFiles.length > 0" x-show="currentSessionType !== 'discord'">
+                    <div class="chat-file-preview" x-show="pendingFiles.length > 0 && currentSessionType !== 'discord'"
                         <template x-for="(f, idx) in pendingFiles" :key="idx">
                             <div class="chat-file-item">
                                 <span x-text="'📄 ' + f.name + ' (' + formatFileSize(f.size) + ')'"></span>
@@ -660,7 +669,7 @@ Append to `src/raisebull/admin/static/style.css` (find the chat section):
 .chat-drop-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(var(--accent-rgb, 201, 130, 26), 0.15);
+    background: rgba(42, 77, 20, 0.15);
     border: 3px dashed var(--accent);
     display: flex;
     align-items: center;
@@ -673,9 +682,8 @@ Append to `src/raisebull/admin/static/style.css` (find the chat section):
     font-weight: 700;
     color: var(--accent);
 }
-.chat-main {
-    position: relative;
-}
+/* NOTE: Add position: relative to the EXISTING .chat-main block in style.css,
+   do NOT create a second .chat-main selector. */
 ```
 
 - [ ] **Step 4: Verify by loading the page**
