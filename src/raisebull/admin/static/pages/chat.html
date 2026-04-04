@@ -31,7 +31,7 @@
         </div>
 
         <!-- Chat area (right panel) -->
-        <div class="card chat-main">
+        <div class="card chat-main" @dragover.prevent="if(currentSession && currentSessionType !== 'discord') dragActive = true" @dragleave.self="dragActive = false">
             <!-- Mobile: session pills -->
             <div class="chat-pills">
                 <button class="chat-pill" style="background:var(--accent);color:#fff;border-color:var(--accent)" @click="newSession()">+ New</button>
@@ -40,6 +40,14 @@
                          @click="selectSession(s.id)"
                          x-text="s.name || shortId(s.id)"></div>
                 </template>
+            </div>
+
+            <!-- Drag and drop overlay -->
+            <div class="chat-drop-overlay" x-show="dragActive"
+                 @dragover.prevent="dragActive = true"
+                 @dragleave.prevent="dragActive = false"
+                 @drop.prevent="handleDrop($event)">
+                <div class="chat-drop-text">拖放檔案到這裡</div>
             </div>
 
             <!-- Placeholder when no session -->
@@ -118,13 +126,23 @@
                         </div>
                     </div>
 
+                    <!-- File preview bar -->
+                    <div class="chat-file-preview" x-show="pendingFiles.length > 0 && currentSessionType !== 'discord'">
+                        <template x-for="(f, idx) in pendingFiles" :key="idx">
+                            <div class="chat-file-item">
+                                <span x-text="'📄 ' + f.name + ' (' + formatFileSize(f.size) + ')'"></span>
+                                <button class="chat-file-remove" @click="removePendingFile(idx)">✕</button>
+                            </div>
+                        </template>
+                    </div>
+
                     <!-- Input area -->
                     <div class="chat-input-area" x-show="currentSessionType !== 'discord'">
                         <label class="chat-upload-btn" title="Upload file">
                             📎
-                            <input type="file" style="display:none"
+                            <input type="file" multiple style="display:none"
                                    accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.docx,.xlsx,.pptx,.csv,.md,.txt"
-                                   @change="uploadFile($event)">
+                                   @change="addFiles($event)" x-ref="fileInput">
                         </label>
                         <textarea class="chat-input"
                                   x-model="input"
@@ -133,7 +151,7 @@
                                   placeholder="Type a message... (Cmd+Enter to send)"
                                   :disabled="sending"
                                   rows="3"></textarea>
-                        <button class="btn btn-primary" @click="send()" :disabled="sending || !input.trim()">
+                        <button class="btn btn-primary" @click="send()" :disabled="sending || (!input.trim() && pendingFiles.length === 0)">
                             Send
                         </button>
                     </div>

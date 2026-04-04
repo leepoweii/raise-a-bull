@@ -8,6 +8,8 @@ window.chatPage = function() {
         messages: [],
         input: '',
         sending: false,
+        pendingFiles: [],
+        dragActive: false,
 
         getApp() {
             const appEl = document.querySelector('[x-data]');
@@ -39,38 +41,98 @@ window.chatPage = function() {
             this.currentSessionName = session?.name || null;
             this.messages = [];
             this.input = '';
+            this.pendingFiles = [];
+        },
 
-            // Bull uses Claude Code --resume, no server-side message history
-            this.messages = [];
+        addFiles(event) {
+            const newFiles = Array.from(event.target.files || []);
+            this._validateAndAddFiles(newFiles);
+            event.target.value = '';
+        },
+
+        handleDrop(event) {
+            this.dragActive = false;
+            const newFiles = Array.from(event.dataTransfer.files || []);
+            this._validateAndAddFiles(newFiles);
+        },
+
+        _validateAndAddFiles(newFiles) {
+            const app = this.getApp();
+            for (const f of newFiles) {
+                if (f.size > 10 * 1024 * 1024) {
+                    app.showToast('檔案過大：' + f.name + '（上限 10MB）', 'error');
+                    continue;
+                }
+                if (this.pendingFiles.length >= 5) {
+                    app.showToast('最多 5 個檔案', 'error');
+                    break;
+                }
+                this.pendingFiles.push(f);
+            }
+        },
+
+        removePendingFile(idx) {
+            this.pendingFiles.splice(idx, 1);
+        },
+
+        formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         },
 
         async send() {
-            if (!this.currentSession || !this.input.trim() || this.sending) return;
-
+            if (!this.currentSession || this.sending) return;
             const msg = this.input.trim();
+            const files = [...this.pendingFiles];
+            if (!msg && files.length === 0) return;
+
             this.input = '';
+            this.pendingFiles = [];
             this.sending = true;
 
-            // Optimistic: add user message immediately
-            this.messages.push({ role: 'user', content: msg });
+            const userContent = files.length > 0
+                ? (files.map(f => '📎 ' + f.name).join(', ') + (msg ? '\n' + msg : ''))
+                : msg;
+            this.messages.push({ role: 'user', content: userContent });
             this.$nextTick(() => this.scrollToBottom());
 
             try {
-                const resp = await fetch('/admin/api/chat/' + encodeURIComponent(this.currentSession) + '/messages', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'text/event-stream',
-                    },
-                    credentials: 'same-origin',
-                    body: JSON.stringify({ content: msg }),
-                });
+                let fetchOpts;
+                const url = '/admin/api/chat/' + encodeURIComponent(this.currentSession) + '/messages';
+
+                if (files.length > 0) {
+                    const form = new FormData();
+                    form.append('content', msg);
+                    for (const f of files) form.append('files', f);
+                    fetchOpts = {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'text/event-stream' },
+                        body: form,
+                    };
+                } else {
+                    fetchOpts = {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'text/event-stream',
+                        },
+                        body: JSON.stringify({ content: msg }),
+                    };
+                }
+
+                const resp = await fetch(url, fetchOpts);
 
                 if (resp.status === 401) {
                     window.location.hash = '#/login';
                     return;
                 }
-
+                if (resp.status === 413) {
+                    this.getApp().showToast('檔案過大（上限 10MB）', 'error');
+                    throw new Error('File too large');
+                }
                 if (!resp.ok) throw new Error('Request failed');
 
                 const reader = resp.body.getReader();
@@ -94,14 +156,12 @@ window.chatPage = function() {
                     }
                 }
 
-                // Reload session list (names, msg counts) but keep messages in-memory
                 await this.loadSessions();
             } catch (e) {
-                // Restore input on failure so user can retry
                 this.input = msg;
+                this.pendingFiles = files;
                 this.messages.pop();
-                const appEl = document.querySelector('[x-data]');
-                Alpine.evaluate(appEl, '$data').showToast('Connection error', 'error');
+                this.getApp().showToast('Connection error', 'error');
             }
 
             this.sending = false;
@@ -124,46 +184,9 @@ window.chatPage = function() {
             } else if (event.type === 'error') {
                 this.messages.push({ role: 'assistant', content: '⚠️ ' + (event.content || 'Unknown error') });
             } else if (event.type === 'done') {
-                // Done — no visual action
+                // Done
             }
             this.$nextTick(() => this.scrollToBottom());
-        },
-
-        async uploadFile(event) {
-            const file = event.target.files[0];
-            if (!file || !this.currentSession) return;
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            this.sending = true;
-            this.messages.push({ role: 'user', content: '📎 ' + file.name });
-            this.$nextTick(() => this.scrollToBottom());
-
-            try {
-                const resp = await fetch('/admin/api/chat/' + encodeURIComponent(this.currentSession) + '/upload', {
-                    method: 'POST',
-                    body: formData,
-                });
-
-                if (resp.status === 401) {
-                    window.location.hash = '#/login';
-                    return;
-                }
-
-                const data = await resp.json();
-                if (data.ok) {
-                    await this.selectSession(this.currentSession);
-                    this.getApp().showToast('File processed', 'success');
-                } else {
-                    this.getApp().showToast(data.error || 'Upload failed', 'error');
-                }
-            } catch (e) {
-                this.getApp().showToast('Upload failed', 'error');
-            }
-
-            this.sending = false;
-            event.target.value = '';
         },
 
         async deleteSession() {
@@ -180,6 +203,7 @@ window.chatPage = function() {
                 this.currentSessionName = null;
                 this.messages = [];
                 this.input = '';
+                this.pendingFiles = [];
                 await this.loadSessions();
                 this.getApp().showToast('Session deleted', 'success');
             }
@@ -187,13 +211,10 @@ window.chatPage = function() {
 
         scrollToBottom() {
             const el = this.$refs.messageContainer;
-            if (el) {
-                el.scrollTop = el.scrollHeight;
-            }
+            if (el) el.scrollTop = el.scrollHeight;
         },
 
         shortId(sid) {
-            // "web:session:abc123def456" → "abc123def456"
             if (!sid) return '';
             const parts = sid.split(':');
             return parts[parts.length - 1] || sid;
@@ -201,18 +222,13 @@ window.chatPage = function() {
 
         renderMarkdown(text) {
             if (!text) return '';
-            // Escape HTML
             let s = text
                 .replace(/&/g, '&amp;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
-            // Code blocks (```)
             s = s.replace(/```([\s\S]*?)```/g, '<pre class="chat-code-block">$1</pre>');
-            // Inline code
             s = s.replace(/`([^`]+)`/g, '<code class="chat-inline-code">$1</code>');
-            // Bold
             s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-            // Newlines → <br>
             s = s.replace(/\n/g, '<br>');
             return s;
         },

@@ -702,6 +702,7 @@ input:focus, textarea:focus, select:focus {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
 }
 
 .chat-placeholder {
@@ -929,6 +930,52 @@ input:focus, textarea:focus, select:focus {
     padding: 1px 4px;
     font-family: var(--font-mono);
     font-size: 12px;
+}
+
+/* File upload preview bar */
+.chat-file-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+    border-top: var(--border-width) solid var(--border);
+    background: var(--paper);
+}
+.chat-file-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+}
+.chat-file-remove {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--danger);
+    font-size: 14px;
+    padding: 0 2px;
+}
+
+/* Drag and drop overlay */
+.chat-drop-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(42, 77, 20, 0.15);
+    border: 3px dashed var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    border-radius: 8px;
+}
+.chat-drop-text {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
 }
 
 /* ---- Responsive: Tablet (768-1024px) ---- */
