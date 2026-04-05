@@ -300,3 +300,23 @@ class TestModels:
         models = resp.json()
         assert len(models) == 1
         assert models[0]["id"] == "custom-model"
+
+
+class TestCacheHeaders:
+    @pytest.mark.asyncio
+    async def test_static_html_has_no_cache(self, client):
+        resp = await client.get("/admin/")
+        assert resp.status_code == 200
+        assert "no-cache" in resp.headers.get("cache-control", "")
+
+    @pytest.mark.asyncio
+    async def test_static_js_has_no_cache(self, client):
+        resp = await client.get("/admin/app.js")
+        assert resp.status_code == 200
+        assert "no-cache" in resp.headers.get("cache-control", "")
+
+    @pytest.mark.asyncio
+    async def test_static_css_has_no_cache(self, client):
+        resp = await client.get("/admin/style.css")
+        assert resp.status_code == 200
+        assert "no-cache" in resp.headers.get("cache-control", "")

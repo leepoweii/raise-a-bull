@@ -50,8 +50,22 @@ def create_admin_app(
     app.include_router(models_router)
     app.include_router(chat_router)
 
+    # Static files with no-cache headers (force revalidation on every load)
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
+        from starlette.middleware import Middleware
+        from starlette.responses import Response
+
+        @app.middleware("http")
+        async def add_no_cache_headers(request, call_next):
+            response: Response = await call_next(request)
+            # Apply no-cache to static assets (html, js, css) and index
+            path = request.url.path
+            ct = response.headers.get("content-type", "")
+            if path.endswith((".html", ".js", ".css")) or "text/html" in ct or "javascript" in ct:
+                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+            return response
+
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="admin-static")
 
     return app
