@@ -43,8 +43,11 @@ async def create_session(request: Request):
 async def list_sessions(request: Request):
     sessions_store = getattr(request.app.state, "sessions", None)
     result = []
+    seen_keys: set[str] = set()
 
+    # 1. In-memory web sessions (current process only, may have unsaved metadata)
     for sid, meta in _web_sessions.items():
+        seen_keys.add(sid)
         token_count = 0
         if sessions_store:
             row = await sessions_store.get(sid)
@@ -59,19 +62,24 @@ async def list_sessions(request: Request):
             "token_count": token_count,
         })
 
+    # 2. All sessions from DB (web sessions survive restart, plus Discord/LINE/Heartbeat)
     if sessions_store:
         try:
             db = sessions_store._require_db()
             async with db.execute(
-                "SELECT key, token_count, last_active, domain, name FROM sessions WHERE key NOT LIKE 'web:%'"
+                "SELECT key, token_count, last_active, domain, name FROM sessions"
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
                     key = row[0]
+                    if key in seen_keys:
+                        continue  # already listed from in-memory
                     domain = row[3] if row[3] else "general"
                     db_name = row[4] if len(row) > 4 else None
                     # Determine type from key prefix
-                    if key.startswith("discord:"):
+                    if key.startswith("web:"):
+                        stype = "web"
+                    elif key.startswith("discord:"):
                         stype = "discord"
                     elif key.startswith("line:"):
                         stype = "line"
@@ -79,7 +87,6 @@ async def list_sessions(request: Request):
                         stype = "heartbeat"
                     else:
                         stype = domain
-                    # Display name: DB name > key suffix
                     display_name = db_name or key.split(":")[-1]
                     result.append({
                         "id": key,
@@ -98,25 +105,59 @@ async def list_sessions(request: Request):
 
 @router.delete("/api/chat/{session_id}")
 async def delete_session(session_id: str, request: Request):
-    if session_id not in _web_sessions:
+    sessions_store = getattr(request.app.state, "sessions", None)
+
+    # Check if session exists (in-memory or DB)
+    in_memory = session_id in _web_sessions
+    in_db = False
+    if sessions_store:
+        row = await sessions_store.get(session_id)
+        in_db = row is not None
+
+    if not in_memory and not in_db:
         return JSONResponse({"error": "session not found"}, status_code=404)
 
-    del _web_sessions[session_id]
+    # Remove from in-memory dict
+    _web_sessions.pop(session_id, None)
 
-    sessions_store = getattr(request.app.state, "sessions", None)
+    # Remove from DB + clean uploads
     if sessions_store:
         await sessions_store.clear(session_id)
+
+    # Clean uploads directory
+    import os
+    import shutil
+    workspace = getattr(getattr(request.app.state, "runner", None), "workspace", None)
+    if workspace:
+        uploads_dir = os.path.join(workspace, "uploads", session_id)
+        if os.path.isdir(uploads_dir):
+            shutil.rmtree(uploads_dir, ignore_errors=True)
 
     return {"ok": True}
 
 
 @router.post("/api/chat/{session_id}/messages")
 async def send_message(session_id: str, request: Request):
-    if session_id not in _web_sessions:
+    sessions_store = getattr(request.app.state, "sessions", None)
+    # Allow both in-memory and DB-persisted sessions
+    in_memory = session_id in _web_sessions
+    in_db = False
+    if sessions_store:
+        row = await sessions_store.get(session_id)
+        in_db = row is not None
+    if not in_memory and not in_db:
         return JSONResponse({"error": "session not found"}, status_code=404)
+    # Ensure in-memory entry exists for metadata tracking
+    if not in_memory:
+        _web_sessions[session_id] = {
+            "created_at": row["last_active"] if in_db else datetime.now(timezone.utc).isoformat(),
+            "message_count": 0,
+            "name": row.get("name") if in_db else None,
+        }
 
     runner = getattr(request.app.state, "runner", None)
-    sessions_store = getattr(request.app.state, "sessions", None)
+    if not sessions_store:
+        sessions_store = getattr(request.app.state, "sessions", None)
 
     if runner is None:
         return JSONResponse({"error": "no runner"}, status_code=503)
