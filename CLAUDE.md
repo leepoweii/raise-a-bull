@@ -156,9 +156,9 @@ tests/
 │                     parsers_text, parsers_document, invoice, attachment_router)
 ├── integration/    — 4 files (admin, chat, status, attachments)
 ├── smoke/          — 2 files (LLM basic + MCP search + attachment parse/read)
-├── e2e/            — Playwright (11 dashboard tests)
+├── e2e/            — Playwright (16 tests: auth, nav, status, settings, chat, file upload)
 └── root            — 5 files (runner, session, discord_bot, main, recovery)
-Total: ~130 fast + 12 smoke + 11 e2e
+Total: ~135 fast + 12 smoke + 16 e2e
 ```
 
 ---
@@ -174,6 +174,7 @@ Total: ~130 fast + 12 smoke + 11 e2e
 - **LINE webhook** — `asyncio.create_task` for background processing, reply_token → push fallback
 - **Multimodal parsers** — attachments parsed → text saved to `workspace/uploads/{session_id}/` → prompt gives path → Claude Code Read tool accesses on demand
 - **Vision graceful degrade** — no GEMINI_API_KEY → images get QR scan only, skip description; no pyzbar → skip QR scan
+- **Web Chat file upload** — multipart/form-data on same endpoint (backward compatible with JSON), file picker + drag-and-drop + preview bar, 10MB limit, max 5 files
 
 ---
 
