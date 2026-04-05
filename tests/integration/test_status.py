@@ -93,12 +93,15 @@ class TestStatus:
         """
         import raisebull.heartbeat as hb_mod
 
+        # Reset module state (may be polluted by other tests in the same process)
+        original = hb_mod._last_heartbeat_time
+        hb_mod._last_heartbeat_time = None
+
         # Initially None
         resp = await client.get("/admin/api/status")
         assert resp.json()["heartbeat_last"] is None
 
         # Simulate a heartbeat tick updating the module variable
-        original = hb_mod._last_heartbeat_time
         hb_mod._last_heartbeat_time = 1234567890.123
         try:
             resp = await client.get("/admin/api/status")
