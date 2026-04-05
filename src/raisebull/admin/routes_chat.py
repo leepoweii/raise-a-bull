@@ -63,14 +63,28 @@ async def list_sessions(request: Request):
         try:
             db = sessions_store._require_db()
             async with db.execute(
-                "SELECT key, token_count, last_active FROM sessions WHERE key LIKE 'discord:%'"
+                "SELECT key, token_count, last_active, domain, name FROM sessions WHERE key NOT LIKE 'web:%'"
             ) as cursor:
                 rows = await cursor.fetchall()
                 for row in rows:
+                    key = row[0]
+                    domain = row[3] if row[3] else "general"
+                    db_name = row[4] if len(row) > 4 else None
+                    # Determine type from key prefix
+                    if key.startswith("discord:"):
+                        stype = "discord"
+                    elif key.startswith("line:"):
+                        stype = "line"
+                    elif key.startswith("heartbeat:"):
+                        stype = "heartbeat"
+                    else:
+                        stype = domain
+                    # Display name: DB name > key suffix
+                    display_name = db_name or key.split(":")[-1]
                     result.append({
-                        "id": row[0],
-                        "type": "discord",
-                        "name": row[0].split(":")[-1],
+                        "id": key,
+                        "type": stype,
+                        "name": display_name,
                         "created_at": row[2],
                         "message_count": 0,
                         "token_count": row[1],

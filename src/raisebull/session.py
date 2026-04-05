@@ -28,10 +28,16 @@ class SessionStore:
                 session_id  TEXT NOT NULL,
                 domain      TEXT NOT NULL,
                 last_active TEXT NOT NULL,
-                token_count INTEGER NOT NULL DEFAULT 0
+                token_count INTEGER NOT NULL DEFAULT 0,
+                name        TEXT
             )
             """
         )
+        # Migration: add name column if missing (existing DBs)
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN name TEXT")
+        except Exception:
+            pass  # column already exists
         await self._db.commit()
 
     async def close(self) -> None:
@@ -65,17 +71,34 @@ class SessionStore:
         session_id: str,
         domain: str,
         token_count: int,
+        name: str | None = None,
     ) -> None:
         """Insert or replace a session record."""
         last_active = datetime.now(timezone.utc).isoformat()
-        await self._require_db().execute(
-            """
-            INSERT OR REPLACE INTO sessions
-                (key, session_id, domain, last_active, token_count)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (key, session_id, domain, last_active, token_count),
-        )
+        if name is not None:
+            await self._require_db().execute(
+                """
+                INSERT OR REPLACE INTO sessions
+                    (key, session_id, domain, last_active, token_count, name)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (key, session_id, domain, last_active, token_count, name),
+            )
+        else:
+            # Preserve existing name on update
+            await self._require_db().execute(
+                """
+                INSERT INTO sessions
+                    (key, session_id, domain, last_active, token_count)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    session_id = excluded.session_id,
+                    domain = excluded.domain,
+                    last_active = excluded.last_active,
+                    token_count = excluded.token_count
+                """,
+                (key, session_id, domain, last_active, token_count),
+            )
         await self._require_db().commit()
 
     async def clear(self, key: str) -> None:

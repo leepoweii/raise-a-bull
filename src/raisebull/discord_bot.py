@@ -330,6 +330,7 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
                 session_id=effective_sid,
                 domain=domain,
                 token_count=existing_tokens + (result.input_tokens or 0) + (result.output_tokens or 0),
+                name=channel_name,
             )
 
         except Exception:
