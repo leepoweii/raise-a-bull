@@ -12,15 +12,15 @@
             <div class="chat-session-list">
                 <template x-for="s in sessions" :key="s.id">
                     <div class="chat-session-item"
-                         :class="{ active: currentSession === s.id, 'discord-session': s.type === 'discord' }"
+                         :class="{ active: currentSession === s.id }"
                          @click="selectSession(s.id)">
                         <div class="chat-session-id">
-                            <span x-show="s.type === 'discord'" style="margin-right:4px">🎮</span>
+                            <span style="margin-right:4px" x-text="sessionIcon(s.type)"></span>
                             <span x-text="s.name || shortId(s.id)"></span>
                         </div>
                         <div class="chat-session-meta">
-                            <span x-text="s.message_count + ' msgs'"></span>
-                            <span x-show="s.type === 'discord'" class="badge badge-muted" style="font-size:9px;margin-left:4px">Discord</span>
+                            <span x-text="formatTokens(s.token_count)"></span>
+                            <span class="badge badge-muted" style="font-size:9px;margin-left:4px" x-text="s.type"></span>
                         </div>
                     </div>
                 </template>

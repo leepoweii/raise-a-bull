@@ -192,13 +192,24 @@ async def _process_message(
     # 4. Send response (reply_token first, push to chat_id as fallback)
     _send(chat_id, reply_token, result.text or "⚠️ (no response)", messaging_api)
 
-    # 5. Save session
+    # 5. Save session (with display name from LINE profile)
+    session_name = None
+    try:
+        if session_key.startswith("line:group:"):
+            session_name = "LINE Group"
+        else:
+            profile = messaging_api.get_profile(user_id)
+            session_name = profile.display_name
+    except Exception:
+        pass  # name is optional, don't fail on profile lookup
+
     new_tokens = (result.input_tokens or 0) + (result.output_tokens or 0)
     await sessions.save(
         session_key,
         session_id=effective_session_id,
         domain="line",
         token_count=existing_tokens + new_tokens,
+        name=session_name,
     )
 
 

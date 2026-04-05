@@ -214,6 +214,17 @@ window.chatPage = function() {
             if (el) el.scrollTop = el.scrollHeight;
         },
 
+        sessionIcon(type) {
+            return { web: '💬', discord: '🎮', line: '📱', heartbeat: '💓' }[type] || '📋';
+        },
+
+        formatTokens(count) {
+            if (!count) return '0 tokens';
+            if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M tokens';
+            if (count >= 1000) return (count / 1000).toFixed(1) + 'K tokens';
+            return count + ' tokens';
+        },
+
         shortId(sid) {
             if (!sid) return '';
             const parts = sid.split(':');
