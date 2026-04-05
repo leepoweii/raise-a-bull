@@ -63,7 +63,10 @@ def create_admin_app(
             path = request.url.path
             ct = response.headers.get("content-type", "")
             if path.endswith((".html", ".js", ".css")) or "text/html" in ct or "javascript" in ct:
-                response.headers["Cache-Control"] = "no-cache, must-revalidate"
+                response.headers["Cache-Control"] = "no-store, must-revalidate"
+                # Remove ETag to prevent 304 responses with stale content
+                if "etag" in response.headers:
+                    del response.headers["etag"]
             return response
 
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="admin-static")

@@ -307,16 +307,16 @@ class TestCacheHeaders:
     async def test_static_html_has_no_cache(self, client):
         resp = await client.get("/admin/")
         assert resp.status_code == 200
-        assert "no-cache" in resp.headers.get("cache-control", "")
+        assert "no-store" in resp.headers.get("cache-control", "")
 
     @pytest.mark.asyncio
     async def test_static_js_has_no_cache(self, client):
         resp = await client.get("/admin/app.js")
         assert resp.status_code == 200
-        assert "no-cache" in resp.headers.get("cache-control", "")
+        assert "no-store" in resp.headers.get("cache-control", "")
 
     @pytest.mark.asyncio
     async def test_static_css_has_no_cache(self, client):
         resp = await client.get("/admin/style.css")
         assert resp.status_code == 200
-        assert "no-cache" in resp.headers.get("cache-control", "")
+        assert "no-store" in resp.headers.get("cache-control", "")
