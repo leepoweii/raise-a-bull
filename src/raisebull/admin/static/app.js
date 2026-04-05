@@ -37,7 +37,7 @@ function app() {
                 html = html.replace(/<script[\s\S]*?<\/script>/gi, '');
 
                 try {
-                    const mod = await import(`/admin/pages/${this.page}.js`);
+                    const mod = await import(`/admin/pages/${this.page}.js?v=${Date.now()}`);
                     if (mod.init) mod.init(this);
                 } catch (e) {}
 
