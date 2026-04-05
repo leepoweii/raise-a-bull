@@ -167,3 +167,103 @@ test.describe('Web Chat', () => {
     await expect(page.locator('text=Select a session')).toBeVisible({ timeout: 3000 });
   });
 });
+
+test.describe('File Upload', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+    await page.click('a:has-text("Chat")');
+    await page.click('button:has-text("NEW CHAT")');
+    await expect(page.locator('textarea')).toBeVisible({ timeout: 3000 });
+  });
+
+  test('file picker shows preview bar', async ({ page }) => {
+    // Select a file via the hidden input
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: 'test.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Hello from file upload test'),
+    });
+
+    // Preview bar should appear with filename
+    await expect(page.locator('.chat-file-preview')).toBeVisible({ timeout: 3000 });
+    await expect(page.locator('.chat-file-item')).toContainText('test.txt');
+  });
+
+  test('remove file from preview bar', async ({ page }) => {
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: 'remove-me.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('temporary'),
+    });
+
+    await expect(page.locator('.chat-file-item')).toBeVisible({ timeout: 3000 });
+
+    // Click the remove button (✕)
+    await page.click('.chat-file-remove');
+
+    // Preview bar should disappear
+    await expect(page.locator('.chat-file-preview')).not.toBeVisible({ timeout: 3000 });
+  });
+
+  test('send file with text and receive response', async ({ page }) => {
+    // Add file
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: 'data.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('product,price\n高粱酒,580\n貢糖,120'),
+    });
+
+    await expect(page.locator('.chat-file-item')).toBeVisible({ timeout: 3000 });
+
+    // Type text
+    await page.fill('textarea', '最貴的是什麼？只回答名稱。');
+
+    // Send
+    await page.click('button:has-text("SEND")');
+
+    // User bubble should show file attachment
+    await expect(page.locator('.chat-bubble-user')).toContainText('data.csv', { timeout: 5000 });
+
+    // Preview bar should be gone after send
+    await expect(page.locator('.chat-file-preview')).not.toBeVisible();
+
+    // Wait for assistant response (real LLM, may take 10-30s)
+    await expect(page.locator('.chat-bubble-assistant:not(.chat-loading)')).toBeVisible({ timeout: 30000 });
+
+    // Should contain the answer
+    await expect(page.locator('.chat-bubble-assistant:not(.chat-loading)').last()).toContainText('高粱酒', { timeout: 5000 });
+  });
+
+  test('send button enabled when file selected without text', async ({ page }) => {
+    // Initially send button should be disabled (no text, no files)
+    await expect(page.locator('button:has-text("SEND")')).toBeDisabled();
+
+    // Add file
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles({
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('Some content'),
+    });
+
+    // Send button should now be enabled (file present, even without text)
+    await expect(page.locator('button:has-text("SEND")')).toBeEnabled({ timeout: 3000 });
+  });
+
+  test('multiple files show in preview', async ({ page }) => {
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles([
+      { name: 'file1.txt', mimeType: 'text/plain', buffer: Buffer.from('one') },
+      { name: 'file2.txt', mimeType: 'text/plain', buffer: Buffer.from('two') },
+    ]);
+
+    // Both files should appear in preview
+    const items = page.locator('.chat-file-item');
+    await expect(items).toHaveCount(2, { timeout: 3000 });
+    await expect(items.nth(0)).toContainText('file1.txt');
+    await expect(items.nth(1)).toContainText('file2.txt');
+  });
+});
