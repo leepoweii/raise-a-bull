@@ -55,7 +55,7 @@ class SessionStore:
     async def get(self, key: str) -> Optional[dict]:
         """Return session data for *key*, or None if not found."""
         async with self._require_db().execute(
-            "SELECT key, session_id, domain, last_active, token_count "
+            "SELECT key, session_id, domain, last_active, token_count, name "
             "FROM sessions WHERE key = ?",
             (key,),
         ) as cursor:
