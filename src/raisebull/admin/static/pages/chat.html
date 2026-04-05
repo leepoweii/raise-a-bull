@@ -61,7 +61,7 @@
                     <!-- Header with session info + delete -->
                     <div class="chat-header">
                         <span class="mono" x-text="currentSessionName || shortId(currentSession)"></span>
-                        <button x-show="currentSessionType !== 'discord'" class="btn btn-danger btn-sm" @click="deleteSession()">Delete</button>
+                        <button class="btn btn-danger btn-sm" @click="deleteSession()">Delete</button>
                     </div>
 
                     <!-- Message stream -->
