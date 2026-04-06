@@ -359,12 +359,22 @@ async def get_history(session_key: str, request: Request):
                     continue
 
                 if msg_type == "user":
-                    text = ""
                     for block in content_blocks:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text += block.get("text", "")
-                    if text:
-                        messages.append({"role": "user", "content": text})
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "tool_result":
+                            # Tool results appear as user messages in .jsonl
+                            result_content = block.get("content", "")
+                            if isinstance(result_content, list):
+                                result_content = " ".join(
+                                    b.get("text", "") for b in result_content
+                                    if isinstance(b, dict) and b.get("type") == "text"
+                                )
+                            messages.append({"role": "tool", "content": str(result_content)})
+                        elif block.get("type") == "text":
+                            text = block.get("text", "")
+                            if text:
+                                messages.append({"role": "user", "content": text})
 
                 elif msg_type == "assistant":
                     thinking = None
@@ -378,9 +388,10 @@ async def get_history(session_key: str, request: Request):
                         elif block.get("type") == "text":
                             text = block.get("text", "")
                         elif block.get("type") == "tool_use":
+                            # Match live SSE format: arguments as JSON string
                             tool_calls.append({
                                 "name": block.get("name", ""),
-                                "input": block.get("input", {}),
+                                "arguments": json.dumps(block.get("input", {})),
                             })
                     if thinking or text or tool_calls:
                         entry = {"role": "assistant"}

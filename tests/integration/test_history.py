@@ -30,6 +30,7 @@ async def setup(tmp_path, monkeypatch):
         json.dumps({"type": "assistant", "message": {"content": [{"type": "thinking", "thinking": "Let me think..."}]}}),
         json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi there!"}]}}),
         json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "/test"}}]}}),
+        json.dumps({"type": "user", "message": {"content": [{"type": "tool_result", "content": [{"type": "text", "text": "file contents here"}]}]}}),
     ]) + "\n")
 
     # Corrupted .jsonl
@@ -91,10 +92,17 @@ class TestHistoryAPI:
         # Check thinking
         asst_thinking = [m for m in msgs if m.get("role") == "assistant" and m.get("thinking")]
         assert len(asst_thinking) >= 1
-        # Check tool_use
+        # Check tool_use — arguments must be a JSON string (matches live SSE format)
         asst_tools = [m for m in msgs if m.get("role") == "assistant" and m.get("tool_calls")]
         assert len(asst_tools) >= 1
-        assert asst_tools[0]["tool_calls"][0]["name"] == "Read"
+        tc = asst_tools[0]["tool_calls"][0]
+        assert tc["name"] == "Read"
+        assert isinstance(tc["arguments"], str)
+        assert json.loads(tc["arguments"]) == {"file_path": "/test"}
+        # Check tool_result is emitted as role: "tool"
+        tool_results = [m for m in msgs if m.get("role") == "tool"]
+        assert len(tool_results) >= 1
+        assert "file contents" in tool_results[0]["content"]
 
     @pytest.mark.asyncio
     async def test_missing_session_returns_404(self, setup):
