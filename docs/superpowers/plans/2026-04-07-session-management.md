@@ -12,6 +12,37 @@
 
 ---
 
+## Sub-Phase Structure
+
+This plan is split into 3 independent sub-phases, each producing deployable software:
+
+| Sub-phase | Tasks | What it delivers | Depends on |
+|-----------|-------|-------------------|------------|
+| **SP1: Buffer + Discord + LINE** | 1, 2, 3, 4 | Discord/LINE buffer + @mention trigger + three-segment prompt | None |
+| **SP2: History API + Chat UI** | 5, 6 | Dashboard shows full conversation history from .jsonl | None (independent) |
+| **SP3: Heartbeat + Nightly Compact** | 7, 8, 9, 10 | Heartbeat fresh start + nightly compact/consolidate | SP1 (buffer needed for compact inject) |
+
+**Execute order:** SP1 first (most urgent pain point), then SP2 (can parallel), then SP3 (after SP1 stable).
+
+Each sub-phase ends with: all tests pass → push → deploy → verify on samantha-wsl.
+
+### SP1 Checkpoint (after Task 4)
+- Run: `uv run pytest tests/unit/ tests/integration/ -q`
+- Push + rebuild on samantha-wsl
+- Verify: send messages in Discord channel → @mention → bot responds with buffer context
+
+### SP2 Checkpoint (after Task 6)
+- Run: `uv run pytest tests/unit/ tests/integration/ -q`
+- Push + rebuild on samantha-wsl
+- Verify: click any session in dashboard → conversation history loads
+
+### SP3 Checkpoint (after Task 10)
+- Run: `uv run pytest tests/unit/ tests/integration/ -q` + smoke tests
+- Push + rebuild on samantha-wsl
+- Verify: heartbeat no longer accumulates tokens + nightly job runs
+
+---
+
 ## File Structure
 
 ### New files
@@ -35,6 +66,12 @@
 | `src/raisebull/admin/routes_settings.py` | Add buffer_time, nightly_compact_hour to _ALLOWED_KEYS |
 | `src/raisebull/admin/static/pages/chat.js` | Load history on session select |
 | `workspace.example/config/settings.json` | Add new setting defaults |
+
+---
+
+---
+
+# SP1: Buffer + Discord + LINE (Tasks 1–4)
 
 ---
 
@@ -713,6 +750,10 @@ git commit -m "feat: LINE message buffer — @mention detection, group buffer, D
 
 ---
 
+# SP2: History API + Chat UI (Tasks 5–6)
+
+---
+
 ## Task 5: Session History API
 
 **Files:**
@@ -981,6 +1022,10 @@ Expected: all pass
 git add src/raisebull/admin/static/pages/chat.js
 git commit -m "feat: chat page loads session history from .jsonl on select"
 ```
+
+---
+
+# SP3: Heartbeat + Nightly Compact (Tasks 7–10)
 
 ---
 
