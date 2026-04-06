@@ -152,13 +152,15 @@ npx playwright test
 
 ```
 tests/
-├── unit/           — 8 files (trace, heartbeat, stream_buffer, three_tier,
-│                     parsers_text, parsers_document, invoice, attachment_router)
-├── integration/    — 4 files (admin, chat, status, attachments)
-├── smoke/          — 2 files (LLM basic + MCP search + attachment parse/read)
+├── unit/           — 11 files (trace, heartbeat, stream_buffer, three_tier,
+│                     parsers_text, parsers_document, invoice, attachment_router,
+│                     buffer, line_mention, nightly_compact)
+├── integration/    — 7 files (admin, chat, status, attachments, buffer_flow,
+│                     history, line_webhook)
+├── smoke/          — 2 files (LLM basic + MCP search + attachment + buffer prompt)
 ├── e2e/            — Playwright (16 tests: auth, nav, status, settings, chat, file upload)
 └── root            — 5 files (runner, session, discord_bot, main, recovery)
-Total: ~135 fast + 12 smoke + 16 e2e
+Total: ~204 fast + 16 smoke + 16 e2e
 ```
 
 ---
@@ -175,6 +177,11 @@ Total: ~135 fast + 12 smoke + 16 e2e
 - **Multimodal parsers** — attachments parsed → text saved to `workspace/uploads/{session_id}/` → prompt gives path → Claude Code Read tool accesses on demand
 - **Vision graceful degrade** — no GEMINI_API_KEY → images get QR scan only, skip description; no pyzbar → skip QR scan
 - **Web Chat file upload** — multipart/form-data on same endpoint (backward compatible with JSON), file picker + drag-and-drop + preview bar, 10MB limit, max 5 files
+- **Message buffer** — Discord/LINE accumulate messages in SQLite during silent mode; on @mention (Discord) or prefix trigger (LINE), buffer is injected as three-segment prompt (datetime + earlier + recent + mention), then hard-deleted after reply
+- **Per-channel lock** — `asyncio.Lock` per channel serializes LLM calls, preventing race conditions
+- **Session history** — Dashboard reads Claude Code `.jsonl` files to display full conversation history
+- **Heartbeat fresh start** — Each tick uses `session_id=None` to prevent token accumulation
+- **Nightly compact** — Scheduled job compacts sessions >50K tokens with new activity, consolidates learnings into memory files
 
 ---
 
