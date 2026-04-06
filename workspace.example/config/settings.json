@@ -6,5 +6,6 @@
   "session_idle_timeout": "1800",
   "heartbeat_interval": "1800",
   "buffer_time": "10",
-  "nightly_compact_hour": "3"
+  "nightly_compact_hour": "3",
+  "line_trigger_prefix": "小牛兒"
 }

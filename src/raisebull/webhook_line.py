@@ -57,6 +57,20 @@ def _get_line_lock(key: str) -> _asyncio.Lock:
 
 
 # ---------------------------------------------------------------------------
+# Trigger prefix (LINE groups can't @mention bots)
+# ---------------------------------------------------------------------------
+
+def _read_trigger_prefix(workspace: str) -> str:
+    """Read line_trigger_prefix from settings. Default: '小牛兒'."""
+    import json
+    try:
+        with open(os.path.join(workspace or "/app/workspace", "config", "settings.json")) as f:
+            return json.load(f).get("line_trigger_prefix", "小牛兒")
+    except Exception:
+        return "小牛兒"
+
+
+# ---------------------------------------------------------------------------
 # @mention detection
 # ---------------------------------------------------------------------------
 
@@ -192,13 +206,22 @@ async def handle_line_message(
         mention = getattr(event.message, "mention", None)
         is_mentioned = line_bot_is_mentioned(mention)
 
-        if not is_mentioned:
+        # Fallback: text prefix trigger (LINE can't @mention bots in groups)
+        # Reads line_trigger_prefix from settings (default: "小牛兒")
+        trigger_prefix = _read_trigger_prefix(runner.workspace)
+        prefix_triggered = raw_text.startswith(trigger_prefix) if trigger_prefix else False
+
+        if not is_mentioned and not prefix_triggered:
             # Silent: buffer only, no LLM
             await buffer.insert(session_key, user_id, raw_text, _time())
             return
 
-        # Active: collect @mention text (strip the mention markup if possible)
-        mention_text = _strip_self_mention(raw_text, mention)
+        # Active: strip mention/prefix to get actual request
+        if is_mentioned:
+            mention_text = _strip_self_mention(raw_text, mention)
+        else:
+            # Strip prefix trigger from text
+            mention_text = raw_text[len(trigger_prefix):].strip() or "Hello"
 
         async with _get_line_lock(session_key):
             buffer_time = buffer.read_buffer_time(runner.workspace)

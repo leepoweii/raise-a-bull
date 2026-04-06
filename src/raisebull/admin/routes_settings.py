@@ -20,6 +20,7 @@ _ALLOWED_KEYS: dict[str, tuple[str, str | None]] = {
     "heartbeat_interval": ("1800", "HEARTBEAT_INTERVAL"),
     "buffer_time": ("10", "BUFFER_TIME"),
     "nightly_compact_hour": ("3", "NIGHTLY_COMPACT_HOUR"),
+    "line_trigger_prefix": ("小牛兒", "LINE_TRIGGER_PREFIX"),
 }
 
 
