@@ -42,6 +42,21 @@ window.chatPage = function() {
             this.messages = [];
             this.input = '';
             this.pendingFiles = [];
+
+            // Load conversation history from Claude Code .jsonl
+            try {
+                const history = await this.getApp().api(
+                    '/api/chat/' + encodeURIComponent(sid) + '/history'
+                );
+                if (Array.isArray(history)) {
+                    for (const msg of history) {
+                        this.messages.push(msg);
+                    }
+                }
+            } catch (e) {
+                // History unavailable — empty chat is fine
+            }
+            this.$nextTick(() => this.scrollToBottom());
         },
 
         addFiles(event) {
