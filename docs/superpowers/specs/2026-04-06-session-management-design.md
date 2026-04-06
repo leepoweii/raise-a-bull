@@ -35,29 +35,56 @@ CREATE TABLE IF NOT EXISTS message_buffer (
 CREATE INDEX IF NOT EXISTS idx_buffer_channel ON message_buffer(channel_key);
 ```
 
+### Per-Channel Lock
+
+Add `asyncio.Lock` per channel to serialize message processing (same pattern as raise-a-calf's SessionManager). Prevents race conditions when multiple messages arrive simultaneously.
+
+```python
+_channel_locks: dict[str, asyncio.Lock] = {}
+
+def get_lock(key: str) -> asyncio.Lock:
+    if key not in _channel_locks:
+        _channel_locks[key] = asyncio.Lock()
+    return _channel_locks[key]
+```
+
+All LLM calls and buffer operations are wrapped in `async with get_lock(key)`.
+
 ### Discord Bot Changes
 
-**Every message** (whether mention or not):
+**Silent mode** (not mentioned, not active):
 - `INSERT INTO message_buffer (channel_key, author, content, timestamp)`
-- Bot messages excluded (`if message.author.bot: return` already handles this)
+- Attachments: process immediately (parse → workspace/uploads/), store filepath in buffer content
+- No LLM call, no lock needed for INSERT
 
-**On @mention** (or during active timeout window):
-1. `SELECT * FROM message_buffer WHERE channel_key = ? ORDER BY timestamp`
-2. Split by `buffer_time` setting (default 10 minutes) — for **display grouping only**, all buffer messages are injected:
+**On @mention** (transition from silent to active):
+1. Acquire per-channel lock
+2. `SELECT * FROM message_buffer WHERE channel_key = ? ORDER BY timestamp`
+3. Split by `buffer_time` setting (default 10 minutes) — for **display grouping only**, all buffer messages are injected verbatim:
    - Older than buffer_time → grouped under "Earlier conversation" header
    - Within buffer_time → grouped under "Recent conversation" header
-   - All messages are included verbatim (no truncation for typical workgroup volume)
-3. Append current mention text as "User request"
-4. Prepend current datetime for agent time awareness
-5. `runner.run(combined_prompt, session_id=existing)`
-6. After reply: `DELETE FROM message_buffer WHERE channel_key = ?`
+4. Append current mention text as "User request"
+5. Prepend current datetime for agent time awareness
+6. `runner.run(combined_prompt, session_id=existing)`
+7. After reply: `DELETE FROM message_buffer WHERE channel_key = ?`
+8. Enter active mode, release lock
 
-### Three-tier Mode (unchanged logic, new buffer)
+**Active mode** (within auto_reply_timeout after mention):
+- **Does NOT use buffer** — messages go directly to LLM
+- Acquire per-channel lock → `runner.run(message, session_id=existing)` → release lock
+- Messages are serialized by the lock (Bob finishes before Carol starts)
+- Session context from `--resume` already contains previous active-mode exchanges
+- No buffer INSERT, no buffer DELETE
+
+**Timeout** → back to silent → new messages start accumulating in buffer
+
+### Three-tier Mode with Buffer
 
 ```
-Silent  → accumulate to buffer (no LLM call)
-Active  → accumulate to buffer + respond (LLM call)
-Mention → accumulate to buffer + respond (LLM call) + enter active mode
+Silent  → INSERT to buffer only (no LLM call)
+Mention → acquire lock → read buffer → LLM call → DELETE buffer → enter active → release lock
+Active  → acquire lock → direct LLM call (no buffer) → release lock
+Timeout → back to silent
 ```
 
 ### Prompt Format
@@ -115,19 +142,23 @@ def line_bot_is_mentioned(event: MessageEvent) -> bool:
 
 Currently: every TextMessageContent triggers LLM call.
 
-New behavior for group chats:
-- Non-mention text → buffer only (no LLM)
-- @mention text → buffer + three-segment prompt + LLM response
-- Active mode after mention → respond to all messages for `auto_reply_timeout` seconds
+New behavior for **group chats**:
+- Non-mention text → buffer only (no LLM), same per-channel lock pattern as Discord
+- @mention text (is_self=True) → acquire lock → read buffer → three-segment prompt → LLM → DELETE buffer → enter active
+- Active mode → direct LLM call (no buffer), serialized by lock
+- Timeout → back to silent → buffer accumulation resumes
 
-For DMs (1:1): behavior unchanged — always respond (no buffering needed).
+For **DMs (1:1)**: behavior unchanged — always respond immediately (no buffering, no mention check needed). Every message triggers LLM call with datetime injection.
 
-### Image/File Messages in Buffer
+### Attachments in Silent Mode (Discord + LINE)
 
-When image/file arrives without mention:
-- Store in buffer with `has_attachment=1` and content = "(image)" or "(file: filename.ext)"
-- If followed by @mention: buffer context includes "(用戶上傳了圖片)" hints
-- The actual attachment processing (parser → workspace/uploads/) only happens on mention trigger
+When image/file arrives without mention (silent mode):
+- **Process immediately**: parse → save to workspace/uploads/ (same as current behavior)
+- Store in buffer with `has_attachment=1` and content = filepath + description hint
+  - Example: `(附件: workspace/uploads/discord:123/photo.jpg.txt — 圖片描述：一張收據...)`
+- When @mention triggers buffer read, the attachment context is already parsed and available
+
+This is the simplest approach — reuses existing parser pipeline unchanged. Attachments during active mode are also processed immediately (same as current behavior).
 
 ---
 
@@ -279,10 +310,16 @@ Add to `config/settings.json`:
 }
 ```
 
-- `buffer_time`: minutes — messages within this window are injected verbatim; older messages are truncated
+- `buffer_time`: minutes — display grouping threshold. All buffer messages are injected verbatim; this value only controls the visual split between "Earlier" and "Recent" headers in the prompt.
 - `nightly_compact_hour`: hour (0-23) for nightly compact job
 
-Dashboard Settings page updated to show these fields.
+These settings must be added to `_ALLOWED_KEYS` in `routes_settings.py`:
+```python
+"buffer_time": ("10", "BUFFER_TIME"),
+"nightly_compact_hour": ("3", "NIGHTLY_COMPACT_HOUR"),
+```
+
+Dashboard Settings page updated to show these fields. Values take effect on next message (read at runtime from settings file, not env vars).
 
 ---
 
@@ -312,12 +349,35 @@ Dashboard Settings page updated to show these fields.
 
 ## Tests
 
+### Unit Tests
 | Test file | Count | What |
 |-----------|-------|------|
-| `tests/unit/test_buffer.py` | ~10 | Buffer CRUD, three-segment prompt assembly, hard delete |
-| `tests/integration/test_history.py` | ~5 | History API returns parsed JSONL, handles missing files, empty sessions |
-| `tests/unit/test_buffer.py` (LINE) | ~3 | LINE mention detection (is_self, no mention, DM) |
-| Existing tests | 0 new | Verify no regressions |
+| `tests/unit/test_buffer.py` | ~12 | Buffer CRUD (insert, select, delete), three-segment prompt assembly (both segments, recent only, empty buffer), datetime injection, attachment in buffer |
+| `tests/unit/test_line_mention.py` | ~4 | LINE mention detection: is_self=True, no mention, DM (no buffer), @all (not a bot mention) |
+| `tests/unit/test_nightly_compact.py` | ~5 | Eligible session selection (token threshold, last_compacted_at), buffer injection before compact, heartbeat skip |
+
+### Integration Tests
+| Test file | Count | What |
+|-----------|-------|------|
+| `tests/integration/test_history.py` | ~7 | History API: returns parsed JSONL, user/assistant/thinking/tool messages, missing .jsonl file → empty, corrupted .jsonl → graceful error, empty session |
+| `tests/integration/test_buffer_flow.py` | ~5 | Full buffer flow: insert messages → mock mention → verify prompt format sent to runner, buffer cleared after reply, active mode skips buffer, per-channel lock serialization |
+
+### Regression Tests
+| Test file | Count | What |
+|-----------|-------|------|
+| `tests/integration/test_buffer_flow.py` | ~3 | LINE group without mention → no LLM call, LINE group with mention → LLM with buffer, LINE DM → always LLM (no buffer) |
+
+### Smoke Tests
+| Test file | Count | What |
+|-----------|-------|------|
+| `tests/smoke/test_smoke.py` | ~2 | Real LLM: buffer messages → mention → verify response references buffer context; History API returns real .jsonl content |
+
+### E2E Tests
+| Test file | Count | What |
+|-----------|-------|------|
+| `tests/e2e/dashboard.spec.ts` | ~2 | Select Discord session → history loads in chat area; Select session → token count visible in sidebar |
+
+**Total new tests: ~40**
 
 ---
 
@@ -327,3 +387,4 @@ Dashboard Settings page updated to show these fields.
 - Buffer persistence across container restarts for Web Chat (Web Chat doesn't buffer — it sends directly)
 - Cross-channel session continuation from dashboard
 - Upload cleanup based on session compact
+- Heartbeat old `.jsonl` cleanup (future nightly cleanup job)
