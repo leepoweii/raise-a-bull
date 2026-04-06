@@ -143,8 +143,13 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
             msgs = await buffer.get_all(key)
             if msgs:
                 prompt = await buffer.build_prompt(key, "(nightly compact — injecting buffered messages)")
-                await runner.run(prompt, session_id=session_id, timeout_seconds=300.0)
-                await buffer.delete_channel(key)
+                inject_result = await runner.run(prompt, session_id=session_id, timeout_seconds=300.0)
+                if not inject_result.error:
+                    # Only clear buffer once we know the injection succeeded
+                    await buffer.delete_channel(key)
+                    session_id = inject_result.session_id or session_id
+                else:
+                    logger.warning("Buffer injection failed for %s, keeping buffer: %s", key, inject_result.error)
 
         # Step 2: compact
         result = await runner.run("/compact", session_id=session_id, timeout_seconds=300.0)
@@ -152,13 +157,15 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
             logger.error("Compact failed for %s: %s", key, result.error)
             continue
 
-        # Step 3: update DB — save new session_id + last_compacted_at
-        now = datetime.now(timezone.utc).isoformat()
+        # Step 3: update DB — save new session_id, then stamp last_compacted_at >= last_active
         new_session_id = result.session_id or session_id
         await sessions.save(
             key, session_id=new_session_id, domain=s["domain"],
-            token_count=result.input_tokens or s["token_count"],
+            token_count=result.output_tokens or s["token_count"],
         )
+        # Capture timestamp AFTER save() so last_compacted_at >= last_active,
+        # preventing is_compact_eligible() from treating the compact itself as new activity.
+        now = datetime.now(timezone.utc).isoformat()
         await sessions.update_compacted_at(key, now)
 
     # Step 4: consolidate — one LLM call to update memory
