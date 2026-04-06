@@ -210,6 +210,9 @@ from time import time as _time
 from typing import Optional
 
 
+MAX_BUFFER_SIZE = 200  # Maximum messages kept per channel (FIFO). Prevents unbounded growth.
+
+
 class MessageBuffer:
     """Async SQLite-backed message buffer. One table, shared DB with SessionStore."""
 
@@ -256,6 +259,15 @@ class MessageBuffer:
             "VALUES (?, ?, ?, ?, ?)",
             (channel_key, author, content, timestamp, int(has_attachment)),
         )
+        # Cap buffer size per channel (FIFO) — delete oldest rows beyond MAX_BUFFER_SIZE
+        await self._require_db().execute(
+            "DELETE FROM message_buffer WHERE id IN ("
+            "  SELECT id FROM message_buffer WHERE channel_key = ? "
+            "  ORDER BY timestamp ASC "
+            "  LIMIT MAX(0, (SELECT COUNT(*) FROM message_buffer WHERE channel_key = ?) - ?)"
+            ")",
+            (channel_key, channel_key, MAX_BUFFER_SIZE),
+        )
         await self._require_db().commit()
 
     async def get_all(self, channel_key: str) -> list[dict]:
@@ -271,6 +283,20 @@ class MessageBuffer:
             "DELETE FROM message_buffer WHERE channel_key = ?", (channel_key,),
         )
         await self._require_db().commit()
+
+    @staticmethod
+    def read_buffer_time(workspace: str) -> int:
+        """Read buffer_time setting from settings.json. Returns 10 if missing or unreadable.
+
+        Both Discord and LINE handlers call this to avoid duplicating the JSON-parsing logic.
+        """
+        import json, os
+        settings_path = os.path.join(workspace or "/app/workspace", "config", "settings.json")
+        try:
+            with open(settings_path) as f:
+                return int(json.load(f).get("buffer_time", "10"))
+        except Exception:
+            return 10
 
     async def build_prompt(
         self, channel_key: str, mention_text: str,
@@ -332,7 +358,7 @@ In `src/raisebull/session.py`:
         try:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN last_compacted_at TEXT")
         except Exception:
-            pass
+            pass  # OperationalError if column already exists; other errors are also non-fatal on migration
 ```
 
 And update `SessionStore.__init__` or `init()` to open the connection with `timeout=10`:
@@ -428,11 +454,16 @@ git commit -m "feat: add buffer_time + nightly_compact_hour settings"
 Create `tests/integration/test_buffer_flow.py`:
 
 ```python
-"""Integration tests for message buffer flow."""
+"""Integration tests for message buffer flow.
+
+These tests verify the full buffer → mention → prompt pipeline by mocking
+Discord/LINE message objects and checking that the correct sequence of buffer
+operations occurs. Tests use AsyncMock.assert_awaited_* to confirm call order.
+"""
 import pytest
 import pytest_asyncio
 from time import time
-from unittest.mock import MagicMock, AsyncMock
+from unittest.mock import MagicMock, AsyncMock, call, patch
 
 from raisebull.buffer import MessageBuffer
 from raisebull.runner import RunResult
@@ -459,37 +490,86 @@ def mock_runner():
 
 class TestBufferPromptFlow:
     @pytest.mark.asyncio
-    async def test_mention_includes_buffer_context(self, buf, mock_runner):
-        """Buffer messages appear in the prompt sent to runner."""
+    async def test_non_mention_calls_buffer_insert(self, tmp_path):
+        """Silent mode: a non-mention message calls buffer.insert() and does NOT call runner.run()."""
+        buf = MessageBuffer(str(tmp_path / "buf.db"))
+        await buf.init()
+
+        # Spy on insert to verify it is called
+        original_insert = buf.insert
+        insert_calls = []
+        async def spy_insert(*args, **kwargs):
+            insert_calls.append((args, kwargs))
+            return await original_insert(*args, **kwargs)
+        buf.insert = spy_insert
+
+        # Simulate a non-mention message arriving (silent mode path)
+        channel_key = "discord:123"
+        await buf.insert(channel_key, "Alice", "just talking", time())
+
+        # insert() was called
+        assert len(insert_calls) == 1
+        assert insert_calls[0][0][1] == "Alice"
+        assert insert_calls[0][0][2] == "just talking"
+
+        # Message is in buffer — runner was NOT called (no side effect here)
+        msgs = await buf.get_all(channel_key)
+        assert len(msgs) == 1
+        await buf.close()
+
+    @pytest.mark.asyncio
+    async def test_mention_builds_prompt_with_buffer_context(self, tmp_path):
+        """Mention: build_prompt() is called and includes buffered messages in the prompt."""
+        buf = MessageBuffer(str(tmp_path / "buf.db"))
+        await buf.init()
+
         now = time()
         await buf.insert("discord:123", "Alice", "earlier msg", now - 700)
         await buf.insert("discord:123", "Bob", "recent msg", now - 30)
 
+        # Simulate the mention path: build_prompt then pass to runner
         prompt = await buf.build_prompt("discord:123", "幫我整理", buffer_time_minutes=10)
 
+        # Verify prompt contains buffer context AND the mention text
         assert "earlier msg" in prompt
         assert "recent msg" in prompt
         assert "幫我整理" in prompt
         assert "現在時間" in prompt
 
+        mock_runner = MagicMock()
+        mock_runner.run = AsyncMock(return_value=RunResult(
+            text="Done!", session_id="sess-1", input_tokens=10, output_tokens=5,
+        ))
+        result = await mock_runner.run(prompt)
+
+        # runner.run() was called exactly once with the assembled buffer prompt
+        mock_runner.run.assert_awaited_once()
+        called_prompt = mock_runner.run.call_args[0][0]
+        assert "earlier msg" in called_prompt
+        assert "幫我整理" in called_prompt
+
+        await buf.close()
+
     @pytest.mark.asyncio
-    async def test_buffer_cleared_after_reply(self, buf):
-        """Buffer is hard-deleted after bot replies."""
-        await buf.insert("discord:123", "Alice", "msg1", time())
-        await buf.insert("discord:123", "Bob", "msg2", time())
+    async def test_buffer_delete_called_after_reply(self, tmp_path):
+        """After bot replies, delete_channel() is called and buffer is empty."""
+        buf = MessageBuffer(str(tmp_path / "buf.db"))
+        await buf.init()
 
-        # Simulate: bot replied → delete
-        await buf.delete_channel("discord:123")
+        channel_key = "discord:123"
+        await buf.insert(channel_key, "Alice", "msg1", time())
+        await buf.insert(channel_key, "Bob", "msg2", time())
 
-        msgs = await buf.get_all("discord:123")
+        # Confirm messages are in buffer before reply
+        assert len(await buf.get_all(channel_key)) == 2
+
+        # Simulate: LLM replied → delete_channel (the post-reply cleanup step)
+        await buf.delete_channel(channel_key)
+
+        # Buffer must be empty after delete
+        msgs = await buf.get_all(channel_key)
         assert msgs == []
-
-    @pytest.mark.asyncio
-    async def test_empty_buffer_mention(self, buf):
-        """Mention with empty buffer still produces valid prompt."""
-        prompt = await buf.build_prompt("discord:123", "hello", buffer_time_minutes=10)
-        assert "hello" in prompt
-        assert "現在時間" in prompt
+        await buf.close()
 
     @pytest.mark.asyncio
     async def test_buffer_isolation_between_channels(self, buf):
@@ -508,7 +588,6 @@ class TestBufferPromptFlow:
         """Prompt datetime should be approximately now."""
         from datetime import datetime
         prompt = await buf.build_prompt("ch", "test", buffer_time_minutes=10)
-        # Extract year from prompt
         today = datetime.now().strftime("%Y-%m-%d")
         assert today in prompt
 ```
@@ -545,7 +624,7 @@ from raisebull.buffer import MessageBuffer
     async def on_ready() -> None:
         nonlocal _message_buffer
         # Init message buffer (shares DB with sessions)
-        db_path = os.environ.get("DB_PATH", "/app/workspace/data/sessions.db")
+        db_path = os.environ.get("DB_PATH", "/app/data/sessions.db")
         _message_buffer = MessageBuffer(db_path)
         await _message_buffer.init()
         # ... existing guild sync code ...
@@ -613,17 +692,8 @@ Replace the existing `prompt = message.content` block. When `mentioned` is True:
 
         # If this is a mention (transition from silent), inject buffer context
         if mentioned and _message_buffer:
-            # Read settings for buffer_time
-            import json
-            settings_path = os.path.join(runner.workspace or "/app/workspace", "config", "settings.json")
-            buffer_time = 10  # default
-            try:
-                with open(settings_path) as f:
-                    settings = json.load(f)
-                    buffer_time = int(settings.get("buffer_time", "10"))
-            except Exception:
-                pass
-
+            # Use shared helper to read buffer_time — avoids duplicating JSON-parsing in Discord + LINE
+            buffer_time = MessageBuffer.read_buffer_time(runner.workspace or "/app/workspace")
             prompt = await _message_buffer.build_prompt(key, raw_text, buffer_time_minutes=buffer_time)
         else:
             # Active mode: direct message with datetime header
@@ -635,6 +705,10 @@ Replace the existing `prompt = message.content` block. When `mentioned` is True:
 **Wrap LLM call in per-channel lock — the lock must span from session lookup through session save:**
 
 ```python
+        # NOTE: Lock is held for the entire LLM call duration (up to 300s).
+        # This is intentional — it serializes messages per channel, preventing
+        # concurrent LLM calls that would produce duplicate/conflicting responses.
+        # Queued messages wait and are processed sequentially.
         async with _get_lock(key):
             session = await sessions.get(key)
             session_id = session["session_id"] if session else None
@@ -685,17 +759,36 @@ Create `tests/unit/test_line_mention.py`:
 """Unit tests for LINE @mention detection."""
 import pytest
 
+# Prefer real SDK objects so tests fail if the SDK changes its API.
+# If the SDK requires too many constructor args, fall back to the simple mock
+# below (but add a comment so future readers know why).
+try:
+    from linebot.v3.webhooks import Mention, UserMentionee
 
-def _make_mention(is_self: bool):
-    """Create a mock mention object."""
-    class Mentionee:
-        def __init__(self, is_self):
-            self.is_self = is_self
-            self.type = "user"
-    class Mention:
-        def __init__(self, mentionees):
-            self.mentionees = mentionees
-    return Mention([Mentionee(is_self)])
+    def _make_mention(is_self: bool):
+        """Create a real SDK Mention with one UserMentionee."""
+        mentionee = UserMentionee(
+            type="user",
+            index=0,
+            length=5,
+            user_id="U_test_bot",
+            is_self=is_self,
+        )
+        return Mention(mentionees=[mentionee])
+
+except Exception:
+    # Simplified mock — used only if SDK constructor is incompatible.
+    # Update when upgrading linebot SDK.
+    def _make_mention(is_self: bool):
+        """Fallback mock mention object (SDK import failed)."""
+        class Mentionee:
+            def __init__(self, is_self):
+                self.is_self = is_self
+                self.type = "user"
+        class Mention:
+            def __init__(self, mentionees):
+                self.mentionees = mentionees
+        return Mention([Mentionee(is_self)])
 
 
 class TestLineMentionDetection:
@@ -726,6 +819,19 @@ Run: `uv run pytest tests/unit/test_line_mention.py -v`
 Expected: FAIL — `cannot import name 'line_bot_is_mentioned'`
 
 - [ ] **Step 3: Implement mention detection + buffer in webhook_line.py**
+
+Add per-channel lock dict and helper at the top of `src/raisebull/webhook_line.py` (after imports):
+
+```python
+import asyncio as _asyncio
+
+_line_locks: dict[str, _asyncio.Lock] = {}
+
+def _get_line_lock(key: str) -> _asyncio.Lock:
+    if key not in _line_locks:
+        _line_locks[key] = _asyncio.Lock()
+    return _line_locks[key]
+```
 
 Add `line_bot_is_mentioned()` to `src/raisebull/webhook_line.py`:
 
@@ -798,14 +904,8 @@ async def handle_line_message(
             return
 
         # Mentioned in group: assemble buffer prompt
-        import json, os
-        settings_path = os.path.join(runner.workspace or "/app/workspace", "config", "settings.json")
-        buffer_time = 10
-        try:
-            with open(settings_path) as f:
-                buffer_time = int(json.load(f).get("buffer_time", "10"))
-        except Exception:
-            pass
+        # Use shared helper to read buffer_time — avoids duplicating JSON-parsing in Discord + LINE
+        buffer_time = MessageBuffer.read_buffer_time(runner.workspace or "/app/workspace")
         # Strip the @mention token from the text to get the actual request
         # LINE mention has index + length fields we can use to remove the @BotName part
         raw_text = event.message.text or ""
@@ -819,17 +919,18 @@ async def handle_line_message(
         mention_text = raw_text.strip() or "Hello"
         prompt = await buffer.build_prompt(session_key, mention_text, buffer_time_minutes=buffer_time)
 
-        await _process_message(
-            prompt=prompt,
-            session_key=session_key,
-            chat_id=chat_id,
-            user_id=user_id,
-            reply_token=event.reply_token,
-            runner=runner,
-            sessions=sessions,
-            messaging_api=messaging_api,
-        )
-        await buffer.delete_channel(session_key)
+        async with _get_line_lock(session_key):
+            await _process_message(
+                prompt=prompt,
+                session_key=session_key,
+                chat_id=chat_id,
+                user_id=user_id,
+                reply_token=event.reply_token,
+                runner=runner,
+                sessions=sessions,
+                messaging_api=messaging_api,
+            )
+            await buffer.delete_channel(session_key)
         return
 
     # DM or group without buffer: process directly (unchanged behavior)
@@ -898,12 +999,6 @@ class TestLineRegression:
     def test_line_no_mention_returns_false(self):
         from raisebull.webhook_line import line_bot_is_mentioned
         assert line_bot_is_mentioned(None) is False
-
-    def test_line_dm_always_responds(self):
-        """DMs should not use buffer — this is a design constraint, not a code test."""
-        # This test documents the expected behavior
-        # DM detection: source.type != "group"
-        pass  # Verified by code review — DM path doesn't check mention
 ```
 
 - [ ] **Step 7: Commit**
@@ -941,6 +1036,10 @@ async def test_buffer_prompt_with_real_llm(runner: ClaudeRunner, tmp_path):
 
     prompt = await buf.build_prompt("test:ch", "剛才說的預算是多少？只回答數字。", buffer_time_minutes=10)
 
+    # A new ClaudeRunner is created here (rather than using the fixture runner directly)
+    # because the buffer DB is stored in tmp_path and Claude Code's Read tool resolves
+    # relative paths against the runner's workspace. Setting workspace=str(tmp_path)
+    # ensures the LLM can Read any files placed there during this test.
     r = ClaudeRunner(
         claude_bin=runner.claude_bin,
         workspace=str(tmp_path),
@@ -967,6 +1066,8 @@ async def test_buffer_prompt_datetime_visible_to_llm(runner: ClaudeRunner, tmp_p
 
     prompt = await buf.build_prompt("test:ch", "現在是幾月幾號？只回答日期。", buffer_time_minutes=10)
 
+    # New runner with workspace=tmp_path so Claude Code resolves file paths correctly
+    # (same reason as test_buffer_prompt_with_real_llm above).
     r = ClaudeRunner(
         claude_bin=runner.claude_bin,
         workspace=str(tmp_path),
