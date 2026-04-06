@@ -19,7 +19,7 @@ class SessionStore:
 
     async def init(self) -> None:
         """Open the database connection and create the sessions table if it does not exist."""
-        self._db = await aiosqlite.connect(self._db_path)
+        self._db = await aiosqlite.connect(self._db_path, timeout=10)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute(
             """
@@ -38,6 +38,11 @@ class SessionStore:
             await self._db.execute("ALTER TABLE sessions ADD COLUMN name TEXT")
         except Exception:
             pass  # column already exists
+        # Migration: add last_compacted_at column if missing
+        try:
+            await self._db.execute("ALTER TABLE sessions ADD COLUMN last_compacted_at TEXT")
+        except Exception:
+            pass  # OperationalError if column already exists
         await self._db.commit()
 
     async def close(self) -> None:
@@ -55,7 +60,7 @@ class SessionStore:
     async def get(self, key: str) -> Optional[dict]:
         """Return session data for *key*, or None if not found."""
         async with self._require_db().execute(
-            "SELECT key, session_id, domain, last_active, token_count, name "
+            "SELECT key, session_id, domain, last_active, token_count, name, last_compacted_at "
             "FROM sessions WHERE key = ?",
             (key,),
         ) as cursor:
