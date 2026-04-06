@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Heartbeat push: #%s not found", channel_name)
 
     _heartbeat_push = heartbeat_push
-    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push)
+    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push, buffer=_message_buffer)
 
     if os.getenv("DISCORD_BOT_TOKEN"):
         async def _discord_task() -> None:

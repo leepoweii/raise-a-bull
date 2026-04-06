@@ -24,6 +24,19 @@ _scheduler: Optional[AsyncIOScheduler] = None
 
 HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "300"))
 MAX_DAILY_TRIGGERS = int(os.environ.get("MAX_DAILY_HEARTBEAT_TRIGGERS", "20"))
+COMPACT_TOKEN_THRESHOLD = 50_000
+
+
+def is_compact_eligible(session: dict, key: str = "") -> bool:
+    """Check if a session should be compacted in the nightly job."""
+    if key.startswith("heartbeat:"):
+        return False
+    if session["token_count"] <= COMPACT_TOKEN_THRESHOLD:
+        return False
+    last_compacted = session.get("last_compacted_at")
+    if last_compacted and session["last_active"] <= last_compacted:
+        return False  # No new activity since last compact
+    return True
 
 _last_heartbeat_response: Optional[str] = None
 _last_heartbeat_time: Optional[float] = None
@@ -109,7 +122,58 @@ async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=
         logger.exception("Heartbeat tick failed")
 
 
-def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None) -> None:
+async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=None) -> None:
+    """Run nightly compact + consolidate. Called by scheduler at configured hour."""
+    from datetime import timezone
+
+    all_sessions = await sessions.list_all()
+    eligible = [s for s in all_sessions if is_compact_eligible(s, key=s["key"])]
+
+    if not eligible:
+        logger.info("Nightly compact: no eligible sessions")
+        return
+
+    for s in eligible:
+        key = s["key"]
+        session_id = s["session_id"]
+        logger.info("Nightly compact: %s (tokens=%d)", key, s["token_count"])
+
+        # Step 1: inject unprocessed buffer into session
+        if buffer:
+            msgs = await buffer.get_all(key)
+            if msgs:
+                prompt = await buffer.build_prompt(key, "(nightly compact — injecting buffered messages)")
+                await runner.run(prompt, session_id=session_id, timeout_seconds=300.0)
+                await buffer.delete_channel(key)
+
+        # Step 2: compact
+        result = await runner.run("/compact", session_id=session_id, timeout_seconds=300.0)
+        if result.error:
+            logger.error("Compact failed for %s: %s", key, result.error)
+            continue
+
+        # Step 3: update DB — save new session_id + last_compacted_at
+        now = datetime.now(timezone.utc).isoformat()
+        new_session_id = result.session_id or session_id
+        await sessions.save(
+            key, session_id=new_session_id, domain=s["domain"],
+            token_count=result.input_tokens or s["token_count"],
+        )
+        await sessions.update_compacted_at(key, now)
+
+    # Step 4: consolidate — one LLM call to update memory
+    summary_parts = [f"Session {s['key']}: {s['token_count']} tokens" for s in eligible]
+    consolidate_prompt = (
+        "你是記憶整理助理。以下 session 剛剛被 compact 了。\n"
+        "請讀取各 session 的最新狀態，整理重要資訊，更新 memory/ 目錄下的相關檔案。\n"
+        "你可以自行決定要寫入哪些檔案。\n\n"
+        + "\n".join(summary_parts)
+    )
+    await runner.run(consolidate_prompt, session_id=None, timeout_seconds=600.0)
+    logger.info("Nightly consolidate complete")
+
+
+def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, buffer=None) -> None:
     global _scheduler
     if HEARTBEAT_INTERVAL <= 0:
         logger.info("Heartbeat disabled (interval <= 0)")
@@ -120,6 +184,19 @@ def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None) 
         _heartbeat_tick, "interval", seconds=HEARTBEAT_INTERVAL,
         args=[runner, sessions, push_fn], max_instances=1,
     )
+
+    # Nightly compact job
+    compact_hour = int(os.environ.get("NIGHTLY_COMPACT_HOUR", "3"))
+    _scheduler.add_job(
+        nightly_compact,
+        "cron",
+        hour=compact_hour,
+        minute=0,
+        args=[runner, sessions, buffer],
+        id="nightly_compact",
+    )
+    logger.info("Nightly compact scheduled at %02d:00", compact_hour)
+
     _scheduler.start()
     logger.info("Heartbeat started: interval=%ds", HEARTBEAT_INTERVAL)
 

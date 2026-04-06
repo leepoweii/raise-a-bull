@@ -124,3 +124,19 @@ class SessionStore:
         await self._require_db().commit()
         if cursor.rowcount == 0:
             raise KeyError(f"No session for key {key!r}")
+
+    async def list_all(self) -> list[dict]:
+        """Return all sessions as a list of dicts. Used by nightly compact."""
+        async with self._require_db().execute(
+            "SELECT key, session_id, domain, last_active, token_count, name, last_compacted_at "
+            "FROM sessions"
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+    async def update_compacted_at(self, key: str, timestamp: str) -> None:
+        """Set last_compacted_at for a session. Called after nightly compact."""
+        await self._require_db().execute(
+            "UPDATE sessions SET last_compacted_at = ? WHERE key = ?",
+            (timestamp, key),
+        )
+        await self._require_db().commit()
