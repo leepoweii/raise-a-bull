@@ -217,7 +217,7 @@ class MessageBuffer:
         self._db: aiosqlite.Connection | None = None
 
     async def init(self) -> None:
-        self._db = await aiosqlite.connect(self._db_path)
+        self._db = await aiosqlite.connect(self._db_path, timeout=10)  # prevent SQLITE_BUSY under concurrent writes
         self._db.row_factory = aiosqlite.Row
         await self._db.execute(
             """
@@ -320,9 +320,11 @@ class MessageBuffer:
 Run: `uv run pytest tests/unit/test_buffer.py -v`
 Expected: all PASS
 
-- [ ] **Step 5: Add migration to SessionStore**
+- [ ] **Step 5: Add migration to SessionStore + update get() SELECT**
 
-In `src/raisebull/session.py`, add `last_compacted_at` migration after the `name` migration (inside `init()`):
+In `src/raisebull/session.py`:
+
+**5a.** Add `last_compacted_at` migration after the `name` migration (inside `init()`). Also set `timeout=10` on the aiosqlite connection to prevent `SQLITE_BUSY` under concurrent writes:
 
 ```python
         # Migration: add last_compacted_at column if missing
@@ -331,6 +333,28 @@ In `src/raisebull/session.py`, add `last_compacted_at` migration after the `name
         except Exception:
             pass
 ```
+
+And update `SessionStore.__init__` or `init()` to open the connection with `timeout=10`:
+
+```python
+    async def init(self) -> None:
+        self._db = await aiosqlite.connect(self._db_path, timeout=10)
+        ...
+```
+
+**5b.** Update the `get()` method's SELECT query to include `last_compacted_at` (currently at line 57–59):
+
+Change:
+```python
+"SELECT key, session_id, domain, last_active, token_count, name "
+```
+
+To:
+```python
+"SELECT key, session_id, domain, last_active, token_count, name, last_compacted_at "
+```
+
+Without this fix, `nightly_compact()` → `is_compact_eligible()` will get a `KeyError` on `row["last_compacted_at"]` even after the column is added.
 
 - [ ] **Step 6: Run all tests**
 
@@ -526,6 +550,8 @@ from raisebull.buffer import MessageBuffer
         # ... existing guild sync code ...
 ```
 
+> **Startup race condition note:** `_message_buffer` is `None` from process start until `on_ready` fires (typically a few seconds). Any `on_message` event that arrives in this window will see `_message_buffer is None`. The silent-mode buffer check (`if not should_respond(state, mentioned) and _message_buffer:`) safely skips buffering when `_message_buffer` is None — the message is dropped from the buffer but the bot still responds normally on @mention. This is acceptable behavior during startup.
+
 **Modify `on_message`** — the key logic change:
 
 After `state = channel_states.setdefault(key, ChannelState())` and `mentioned = ...`:
@@ -605,20 +631,29 @@ Replace the existing `prompt = message.content` block. When `mentioned` is True:
             prompt = f"現在時間：{dt.strftime('%Y-%m-%d %H:%M')} ({dt.strftime('%A')})\n\n{raw_text}"
 ```
 
-**Wrap LLM call in per-channel lock:**
+**Wrap LLM call in per-channel lock — the lock must span from session lookup through session save:**
 
 ```python
         async with _get_lock(key):
-            # ... existing LLM call code (reply_msg, thread, buffer, run_with_trace, etc.) ...
-```
+            session = await sessions.get(key)
+            session_id = session["session_id"] if session else None
+            existing_tokens = session["token_count"] if session else 0
 
-**After successful reply, delete buffer:**
+            # ... LLM call (run_with_trace, reply_msg, thread traces, etc.) ...
 
-```python
+            await sessions.save(
+                key,
+                session_id=effective_session_id,
+                domain="discord",
+                token_count=existing_tokens + new_tokens,
+                name=channel_name,
+            )
             # After saving session, clear buffer (content is now in .jsonl)
             if mentioned and _message_buffer:
                 await _message_buffer.delete_channel(key)
 ```
+
+The lock scope is critical: it must wrap from session lookup to session save (inclusive). This prevents two concurrent messages from racing to overwrite the session, and ensures buffer.delete_channel() runs only after a successful save.
 
 - [ ] **Step 4: Run all tests**
 
@@ -691,7 +726,7 @@ Expected: FAIL — `cannot import name 'line_bot_is_mentioned'`
 
 - [ ] **Step 3: Implement mention detection + buffer in webhook_line.py**
 
-Add to `src/raisebull/webhook_line.py`:
+Add `line_bot_is_mentioned()` to `src/raisebull/webhook_line.py`:
 
 ```python
 def line_bot_is_mentioned(mention) -> bool:
@@ -704,13 +739,133 @@ def line_bot_is_mentioned(mention) -> bool:
     return False
 ```
 
-Then modify `handle_line_message()` to add buffer logic for group chats. The key change: if it's a group message and NOT mentioned, buffer only. If mentioned or DM, process normally with buffer prompt injection.
+Modify `handle_line_message()` to accept a `buffer` parameter and add group-chat buffering. Current signature (line 127):
 
-This follows the same pattern as Discord Task 3 — read the spec for exact details. The `_message_buffer` instance should be initialized in `main.py` lifespan and passed through, or initialized as a module-level global in webhook_line.py.
+```python
+async def handle_line_message(
+    event: "MessageEvent",
+    runner: "ClaudeRunner",
+    sessions: "SessionStore",
+    messaging_api: "MessagingApi",
+) -> None:
+```
+
+New signature:
+
+```python
+async def handle_line_message(
+    event: "MessageEvent",
+    runner: "ClaudeRunner",
+    sessions: "SessionStore",
+    messaging_api: "MessagingApi",
+    buffer: "MessageBuffer | None" = None,
+) -> None:
+```
+
+New body — add group-chat buffer logic before the existing `_process_message` call:
+
+```python
+async def handle_line_message(
+    event: "MessageEvent",
+    runner: "ClaudeRunner",
+    sessions: "SessionStore",
+    messaging_api: "MessagingApi",
+    buffer: "MessageBuffer | None" = None,
+) -> None:
+    """Dispatcher: resolve context, handle commands, then process message."""
+    user_id: str = event.source.user_id
+    session_key, prompt, chat_id = _resolve_context(event)
+
+    # Fast path: Rich Menu commands (no Claude invocation)
+    if event.message.text.strip().lower() in _LINE_COMMANDS:
+        await _handle_line_command(
+            event.message.text, session_key,
+            event.reply_token, chat_id, sessions, runner, messaging_api,
+        )
+        return
+
+    # Group chat buffer logic (DMs always respond directly)
+    if event.source.type == "group" and buffer is not None:
+        mention = getattr(event.message, "mention", None)
+        is_mentioned = line_bot_is_mentioned(mention)
+
+        if not is_mentioned:
+            # Silent mode: accumulate to buffer, no LLM call
+            author = user_id  # LINE group chat doesn't expose display names without extra API call
+            from time import time
+            await buffer.insert(session_key, author, event.message.text.strip(), time())
+            return
+
+        # Mentioned in group: assemble buffer prompt
+        import json, os
+        settings_path = os.path.join(runner.workspace or "/app/workspace", "config", "settings.json")
+        buffer_time = 10
+        try:
+            with open(settings_path) as f:
+                buffer_time = int(json.load(f).get("buffer_time", "10"))
+        except Exception:
+            pass
+        # Strip the @mention text to get the actual request
+        mention_text = event.message.text.strip()
+        prompt = await buffer.build_prompt(session_key, mention_text, buffer_time_minutes=buffer_time)
+
+        await _process_message(
+            prompt=prompt,
+            session_key=session_key,
+            chat_id=chat_id,
+            user_id=user_id,
+            reply_token=event.reply_token,
+            runner=runner,
+            sessions=sessions,
+            messaging_api=messaging_api,
+        )
+        await buffer.delete_channel(session_key)
+        return
+
+    # DM or group without buffer: process directly (unchanged behavior)
+    await _process_message(
+        prompt=prompt,
+        session_key=session_key,
+        chat_id=chat_id,
+        user_id=user_id,
+        reply_token=event.reply_token,
+        runner=runner,
+        sessions=sessions,
+        messaging_api=messaging_api,
+    )
+```
+
+Key design decisions:
+- **DMs always skip buffering** — `source.type != "group"` falls through to existing `_process_message`, no change.
+- **Buffer = None fallback** — if buffer isn't initialized yet (startup race, see Issue 9), group messages skip buffering and respond directly (safe degradation).
+- **Buffer deleted after reply** — `delete_channel()` called after `_process_message` returns successfully.
 
 - [ ] **Step 4: Update main.py to pass buffer to LINE handlers**
 
-Initialize `MessageBuffer` in `main.py` lifespan alongside `_sessions`, and pass to LINE handlers.
+In `main.py` lifespan, add a `_message_buffer` global and initialize it alongside `_sessions`. Also note the startup race condition: `_message_buffer` is `None` until `init()` completes — the `buffer: "MessageBuffer | None" = None` default in `handle_line_message()` provides safe degradation if a LINE event arrives before buffer is ready.
+
+Add global:
+```python
+_message_buffer: "MessageBuffer | None" = None
+```
+
+In the lifespan `async with` block, after `_sessions.init()`:
+```python
+    from raisebull.buffer import MessageBuffer
+    _message_buffer = MessageBuffer(os.getenv("DB_PATH", "/app/data/sessions.db"))
+    await _message_buffer.init()
+```
+
+Update the LINE webhook handler in `_process()` (currently at line 189) to pass the buffer:
+
+```python
+                if isinstance(event.message, TextMessageContent):
+                    await handle_line_message(
+                        event, _runner, _sessions, messaging_api, buffer=_message_buffer
+                    )
+```
+
+No change needed for `handle_line_attachment` — attachments in group chats are processed immediately (same as Discord active mode).
 
 - [ ] **Step 5: Run tests**
 
@@ -860,6 +1015,22 @@ class TestHistoryAPI:
         resp = await setup["client"].get("/admin/api/chat/web:empty/history")
         assert resp.status_code == 200
         assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_corrupted_jsonl_skips_bad_lines(self, setup):
+        """Corrupted lines in .jsonl are silently skipped; valid lines still returned."""
+        corrupted = setup["claude_dir"] / "corrupt-sess.jsonl"
+        corrupted.write_text(
+            'NOT_JSON_AT_ALL\n'
+            + json.dumps({"type": "user", "message": {"content": [{"type": "text", "text": "valid line"}]}}) + "\n"
+            + '{"truncated": \n'  # malformed JSON
+        )
+        await setup["store"].save("web:corrupt", session_id="corrupt-sess", domain="web", token_count=0)
+        resp = await setup["client"].get("/admin/api/chat/web:corrupt/history")
+        assert resp.status_code == 200
+        msgs = resp.json()
+        assert len(msgs) == 1
+        assert msgs[0]["content"] == "valid line"
 ```
 
 - [ ] **Step 2: Implement history endpoint in routes_chat.py**
@@ -1112,7 +1283,23 @@ class TestCompactEligibility:
         assert is_compact_eligible(session, key="heartbeat:system") is False
 ```
 
-- [ ] **Step 2: Implement compact eligibility + nightly job**
+- [ ] **Step 2: Add list_all() to SessionStore**
+
+Before implementing `nightly_compact()`, add a `list_all()` method to `src/raisebull/session.py`. The nightly job needs to iterate all sessions — using a public method avoids accessing `sessions._require_db()` directly (a private implementation detail).
+
+```python
+    async def list_all(self) -> list[dict]:
+        """Return all sessions as a list of dicts. Used by nightly compact."""
+        async with self._require_db().execute(
+            "SELECT key, session_id, domain, last_active, token_count, name, last_compacted_at "
+            "FROM sessions"
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+```
+
+Then update the `nightly_compact()` implementation to use `sessions.list_all()` instead of raw DB access.
+
+- [ ] **Step 3: Implement compact eligibility + nightly job**
 
 Add to `src/raisebull/heartbeat.py`:
 
@@ -1137,14 +1324,8 @@ Add nightly compact function:
 ```python
 async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer: "MessageBuffer | None" = None) -> None:
     """Run nightly compact + consolidate. Called by scheduler at configured hour."""
-    db = sessions._require_db()
-
-    # Find eligible sessions
-    async with db.execute(
-        "SELECT key, session_id, token_count, last_active, last_compacted_at FROM sessions"
-    ) as cursor:
-        all_sessions = [dict(row) for row in await cursor.fetchall()]
-
+    # Use list_all() — avoids accessing sessions._require_db() directly
+    all_sessions = await sessions.list_all()
     eligible = [s for s in all_sessions if is_compact_eligible(s, key=s["key"])]
     if not eligible:
         logger.info("Nightly compact: no eligible sessions")
@@ -1169,8 +1350,10 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer: 
             logger.error("Compact failed for %s: %s", key, result.error)
             continue
 
-        # Step 3: update DB
+        # Step 3: update DB — use _require_db() since SessionStore has no update_compacted_at()
+        # (acceptable: this is internal heartbeat code, not user-facing)
         now = datetime.now(timezone.utc).isoformat()
+        db = sessions._require_db()
         await db.execute(
             "UPDATE sessions SET last_compacted_at = ? WHERE key = ?",
             (now, key),
@@ -1192,28 +1375,62 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer: 
     logger.info("Nightly consolidate complete")
 ```
 
-Register in scheduler (in `start_heartbeat`):
+Update `start_heartbeat()` signature in `src/raisebull/heartbeat.py` to accept `buffer` (currently line 110):
+
+Change:
+```python
+def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None) -> None:
+```
+
+To:
+```python
+def start_heartbeat(
+    runner: ClaudeRunner,
+    sessions: SessionStore,
+    push_fn=None,
+    buffer: "MessageBuffer | None" = None,
+) -> None:
+```
+
+Register the nightly compact job using APScheduler's native coroutine support (no lambda needed — APScheduler handles async coroutines directly via `AsyncIOScheduler`):
 
 ```python
     # Nightly compact job
     compact_hour = int(os.environ.get("NIGHTLY_COMPACT_HOUR", "3"))
     _scheduler.add_job(
-        lambda: asyncio.create_task(nightly_compact(runner, sessions, buffer)),
+        nightly_compact,
         "cron", hour=compact_hour, minute=0,
+        args=[runner, sessions, buffer],
         id="nightly_compact",
     )
 ```
 
-- [ ] **Step 3: Run tests**
+Using `args=[runner, sessions, buffer]` instead of `lambda: asyncio.create_task(...)` fixes two issues: (1) APScheduler's `AsyncIOScheduler` natively awaits coroutine functions, no manual `create_task` needed; (2) avoids the closure-capture footgun where lambda captures variable references rather than values.
+
+Update the caller in `main.py` (currently line 90) to pass the buffer:
+
+Change:
+```python
+    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push)
+```
+
+To:
+```python
+    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push, buffer=_message_buffer)
+```
+
+Note: `_message_buffer` must be initialized before `start_heartbeat()` is called. Move the buffer init block to before the `start_heartbeat` call in the lifespan.
+
+- [ ] **Step 4: Run tests**
 
 Run: `uv run pytest tests/unit/test_nightly_compact.py -v`
 Expected: all pass
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/raisebull/heartbeat.py tests/unit/test_nightly_compact.py
-git commit -m "feat: nightly compact + consolidate (>50K tokens, new activity, skip heartbeat)"
+git add src/raisebull/heartbeat.py src/raisebull/session.py tests/unit/test_nightly_compact.py
+git commit -m "feat: nightly compact + consolidate (>50K tokens, new activity, skip heartbeat) + list_all()"
 ```
 
 ---
