@@ -26,8 +26,9 @@ This plan is split into 3 independent sub-phases, each producing deployable soft
 
 Each sub-phase ends with: all tests pass → push → deploy → verify on samantha-wsl.
 
-### SP1 Checkpoint (after Task 4)
-- Run: `uv run pytest tests/unit/ tests/integration/ -q`
+### SP1 Checkpoint (after Task 4b)
+- Run: `uv run pytest tests/unit/ tests/integration/ -q` (all fast tests)
+- Run: smoke test for buffer → LLM flow
 - Push + rebuild on samantha-wsl
 - Verify: send messages in Discord channel → @mention → bot responds with buffer context
 
@@ -914,6 +915,114 @@ git commit -m "feat: LINE message buffer — @mention detection, group buffer, D
 
 ---
 
+## Task 4b: SP1 Smoke Test + Deploy
+
+**Files:**
+- Modify: `tests/smoke/test_smoke.py`
+
+- [ ] **Step 1: Add smoke test for buffer prompt → real LLM**
+
+Append to `tests/smoke/test_smoke.py`:
+
+```python
+@smoke
+@pytest.mark.asyncio
+async def test_buffer_prompt_with_real_llm(runner: ClaudeRunner, tmp_path):
+    """Smoke: buffer messages → build prompt → LLM understands context and answers correctly."""
+    from raisebull.buffer import MessageBuffer
+    from time import time
+
+    buf = MessageBuffer(str(tmp_path / "buf.db"))
+    await buf.init()
+
+    now = time()
+    await buf.insert("test:ch", "Alice", "今天要討論預算", now - 120)
+    await buf.insert("test:ch", "Bob", "預算大約五萬", now - 60)
+
+    prompt = await buf.build_prompt("test:ch", "剛才說的預算是多少？只回答數字。", buffer_time_minutes=10)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(prompt, timeout_seconds=60.0)
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "五萬" in result.text or "50000" in result.text or "5万" in result.text or "50,000" in result.text, \
+        f"Expected budget amount in: {result.text}"
+
+    await buf.close()
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_buffer_prompt_datetime_visible_to_llm(runner: ClaudeRunner, tmp_path):
+    """Smoke: LLM can read the datetime header from buffer prompt."""
+    from raisebull.buffer import MessageBuffer
+    from datetime import datetime
+
+    buf = MessageBuffer(str(tmp_path / "buf.db"))
+    await buf.init()
+
+    prompt = await buf.build_prompt("test:ch", "現在是幾月幾號？只回答日期。", buffer_time_minutes=10)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+        mcp_config=runner.mcp_config,
+    )
+    result = await r.run(prompt, timeout_seconds=60.0)
+    assert result.error is None, f"LLM error: {result.error}"
+    today = datetime.now().strftime("%m")  # at least the month should match
+    assert today in result.text or str(int(today)) in result.text, \
+        f"Expected current month in: {result.text}"
+
+    await buf.close()
+```
+
+- [ ] **Step 2: Run smoke tests locally (requires LLM env vars)**
+
+```bash
+ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
+ANTHROPIC_AUTH_TOKEN=<key> \
+uv run pytest tests/smoke/test_smoke.py::test_buffer_prompt_with_real_llm tests/smoke/test_smoke.py::test_buffer_prompt_datetime_visible_to_llm -v
+```
+Expected: both PASS
+
+- [ ] **Step 3: Run all fast tests**
+
+```bash
+uv run pytest tests/unit/ tests/integration/ -q
+```
+Expected: all pass
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add tests/smoke/test_smoke.py
+git commit -m "test: SP1 smoke tests — buffer prompt context + datetime visible to LLM"
+```
+
+- [ ] **Step 5: Push + deploy to samantha-wsl**
+
+```bash
+git push origin feature/session-management
+
+ssh -p 2222 samantha-machine@samantha-wsl.tail5a1118.ts.net
+cd ~/raise-a-bull && git fetch origin && git checkout feature/session-management && git pull
+BOT_NAME=daniu BOT_PORT=18888 BOT_ENV_FILE=~/bots/daniu/.env WORKSPACE_PATH=~/bots/daniu/workspace docker compose build
+docker stop bull-daniu && docker rm bull-daniu
+BOT_NAME=daniu BOT_PORT=18888 BOT_ENV_FILE=~/bots/daniu/.env WORKSPACE_PATH=~/bots/daniu/workspace docker compose up -d
+```
+
+- [ ] **Step 6: Live verify**
+
+Send messages in Discord channel without @mention, then @mention and verify bot response includes buffer context.
+
+---
+
 # SP2: History API + Chat UI (Tasks 5–6)
 
 ---
@@ -1456,60 +1565,19 @@ git commit -m "feat: nightly compact + consolidate (>50K tokens, new activity, s
 
 ---
 
-## Task 9: Smoke Tests
+## Task 9: SP3 Verification
 
-**Files:**
-- Modify: `tests/smoke/test_smoke.py`
+Buffer smoke tests were already added in Task 4b (SP1). This task runs all tests including SP3-specific ones.
 
-- [ ] **Step 1: Add buffer + history smoke tests**
+- [ ] **Step 1: Run all tests including smoke**
 
-Append to `tests/smoke/test_smoke.py`:
-
-```python
-@smoke
-@pytest.mark.asyncio
-async def test_buffer_prompt_with_real_llm(runner: ClaudeRunner, tmp_path):
-    """Smoke: buffer messages → build prompt → LLM understands context."""
-    from raisebull.buffer import MessageBuffer
-    from time import time
-
-    buf = MessageBuffer(str(tmp_path / "buf.db"))
-    await buf.init()
-
-    now = time()
-    await buf.insert("test:ch", "Alice", "今天要討論預算", now - 120)
-    await buf.insert("test:ch", "Bob", "預算大約五萬", now - 60)
-
-    prompt = await buf.build_prompt("test:ch", "剛才說的預算是多少？只回答數字。", buffer_time_minutes=10)
-
-    r = ClaudeRunner(
-        claude_bin=runner.claude_bin,
-        workspace=str(tmp_path),
-        model=runner.model,
-        mcp_config=runner.mcp_config,
-    )
-    result = await r.run(prompt, timeout_seconds=60.0)
-    assert result.error is None, f"LLM error: {result.error}"
-    assert "五萬" in result.text or "50000" in result.text or "5万" in result.text, f"Expected budget in: {result.text}"
-
-    await buf.close()
-```
-
-- [ ] **Step 2: Run smoke test**
-
-Run:
 ```bash
+uv run pytest tests/unit/ tests/integration/ -q
 ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic \
 ANTHROPIC_AUTH_TOKEN=<key> \
-uv run pytest tests/smoke/test_smoke.py::test_buffer_prompt_with_real_llm -v
+uv run pytest tests/smoke/ -v
 ```
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/smoke/test_smoke.py
-git commit -m "test: smoke test for buffer prompt → LLM reads context correctly"
-```
+Expected: all pass
 
 ---
 
