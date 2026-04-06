@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import secrets
 from datetime import datetime, timezone
 from typing import Any
@@ -306,3 +307,91 @@ async def send_message(session_id: str, request: Request):
                 meta["name"] = (content or "file upload")[:20]
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/api/chat/{session_key}/history")
+async def get_history(session_key: str, request: Request):
+    """Return conversation history by reading Claude Code's .jsonl file."""
+    sessions_store = getattr(request.app.state, "sessions", None)
+    if not sessions_store:
+        return JSONResponse({"error": "no sessions store"}, status_code=503)
+
+    row = await sessions_store.get(session_key)
+    if not row:
+        return JSONResponse({"error": "session not found"}, status_code=404)
+
+    claude_session_id = row["session_id"]
+    claude_home = getattr(request.app.state, "claude_home", None) or os.path.expanduser("~")
+
+    # Find .jsonl file — scan project directories
+    jsonl_path = None
+    projects_dir = os.path.join(claude_home, ".claude", "projects")
+    if os.path.isdir(projects_dir):
+        for subdir in os.listdir(projects_dir):
+            candidate = os.path.join(projects_dir, subdir, f"{claude_session_id}.jsonl")
+            if os.path.isfile(candidate):
+                jsonl_path = candidate
+                break
+
+    if not jsonl_path or not os.path.isfile(jsonl_path):
+        return []
+
+    # Parse JSONL
+    messages = []
+    try:
+        with open(jsonl_path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                msg_type = d.get("type")
+                msg = d.get("message", {})
+                if not isinstance(msg, dict):
+                    continue
+
+                content_blocks = msg.get("content", [])
+                if not isinstance(content_blocks, list):
+                    continue
+
+                if msg_type == "user":
+                    text = ""
+                    for block in content_blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            text += block.get("text", "")
+                    if text:
+                        messages.append({"role": "user", "content": text})
+
+                elif msg_type == "assistant":
+                    thinking = None
+                    text = None
+                    tool_calls = []
+                    for block in content_blocks:
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get("type") == "thinking":
+                            thinking = block.get("thinking", "")
+                        elif block.get("type") == "text":
+                            text = block.get("text", "")
+                        elif block.get("type") == "tool_use":
+                            tool_calls.append({
+                                "name": block.get("name", ""),
+                                "input": block.get("input", {}),
+                            })
+                    if thinking or text or tool_calls:
+                        entry = {"role": "assistant"}
+                        if thinking:
+                            entry["thinking"] = thinking
+                        if text:
+                            entry["content"] = text
+                        if tool_calls:
+                            entry["tool_calls"] = tool_calls
+                        messages.append(entry)
+    except (OSError, UnicodeDecodeError):
+        pass
+
+    return messages
