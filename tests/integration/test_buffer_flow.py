@@ -138,3 +138,126 @@ class TestLineBufferIntegration:
         assert len(grp_msgs) == 1
         assert dm_msgs[0]["content"] == "dm message"
         assert grp_msgs[0]["content"] == "group message"
+
+
+class TestHandlerDispatch:
+    """Test that the webhook handler makes correct buffer/runner decisions."""
+
+    @pytest.mark.asyncio
+    async def test_line_group_no_trigger_only_buffers(self, buf):
+        """LINE group message without mention/prefix → buffer.insert only, no LLM."""
+        from raisebull.webhook_line import handle_line_message
+        from unittest.mock import MagicMock, AsyncMock
+
+        # Mock event: group message, no mention
+        event = MagicMock()
+        event.source.type = "group"
+        event.source.user_id = "U123"
+        event.source.group_id = "Gabc"
+        event.message.text = "普通訊息"
+        event.message.mention = None
+        event.reply_token = "token"
+
+        runner = MagicMock()
+        runner.workspace = "/tmp/ws"
+        runner.run = AsyncMock()
+
+        sessions = MagicMock()
+        sessions.get = AsyncMock(return_value=None)
+
+        messaging_api = MagicMock()
+
+        with patch("raisebull.webhook_line._read_trigger_prefix", return_value="小牛兒"):
+            await handle_line_message(event, runner, sessions, messaging_api, buffer=buf)
+
+        # Buffer should have the message
+        msgs = await buf.get_all("line:group:Gabc")
+        assert len(msgs) == 1
+        assert msgs[0]["content"] == "普通訊息"
+
+        # Runner should NOT have been called
+        runner.run.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_line_group_prefix_triggers_llm(self, buf):
+        """LINE group message with prefix → buffer.build_prompt + runner.run + buffer cleared."""
+        from raisebull.webhook_line import handle_line_message
+        from unittest.mock import MagicMock, AsyncMock, patch as inner_patch
+        from raisebull.runner import RunResult
+
+        # Pre-fill buffer with earlier messages
+        await buf.insert("line:group:Gabc2", "U456", "earlier msg", time() - 60)
+
+        # Mock event: group message with prefix trigger
+        event = MagicMock()
+        event.source.type = "group"
+        event.source.user_id = "U123"
+        event.source.group_id = "Gabc2"
+        event.message.text = "小牛兒 幫我整理"
+        event.message.mention = None
+        event.reply_token = "token"
+
+        runner = MagicMock()
+        runner.workspace = "/tmp/ws"
+        runner.run = AsyncMock()
+
+        sessions = MagicMock()
+        sessions.get = AsyncMock(return_value={"session_id": "old-sess", "token_count": 500})
+        sessions.save = AsyncMock()
+
+        messaging_api = MagicMock()
+        messaging_api.reply_message = MagicMock()
+
+        run_result = RunResult(
+            text="整理完成", session_id="sess-1",
+            input_tokens=100, output_tokens=50,
+        )
+
+        with patch("raisebull.webhook_line._read_trigger_prefix", return_value="小牛兒"), \
+             patch("raisebull.webhook_line._run_with_recovery", new=AsyncMock(return_value=(run_result, "sess-1"))):
+            await handle_line_message(event, runner, sessions, messaging_api, buffer=buf)
+
+        # Buffer should be cleared after reply
+        msgs = await buf.get_all("line:group:Gabc2")
+        assert len(msgs) == 0
+
+    @pytest.mark.asyncio
+    async def test_line_dm_always_responds(self, buf):
+        """LINE DM message → always call runner, no buffer."""
+        from raisebull.webhook_line import handle_line_message
+        from unittest.mock import MagicMock, AsyncMock
+        from raisebull.runner import RunResult
+
+        event = MagicMock()
+        event.source.type = "user"  # DM, not group
+        event.source.user_id = "U123"
+        event.message.text = "你好"
+        event.message.mention = None
+        event.reply_token = "token"
+
+        runner = MagicMock()
+        runner.workspace = "/tmp/ws"
+        runner.run = AsyncMock()
+
+        sessions = MagicMock()
+        sessions.get = AsyncMock(return_value=None)
+        sessions.save = AsyncMock()
+
+        messaging_api = MagicMock()
+        messaging_api.reply_message = MagicMock()
+        messaging_api.show_loading_animation = MagicMock()
+
+        run_result = RunResult(
+            text="你好！", session_id="sess-1",
+            input_tokens=50, output_tokens=30,
+        )
+
+        with patch("raisebull.webhook_line._run_with_recovery", new=AsyncMock(return_value=(run_result, "sess-1"))):
+            await handle_line_message(event, runner, sessions, messaging_api, buffer=buf)
+
+        # sessions.save SHOULD have been called (DM always responds and saves session)
+        assert sessions.save.called
+
+        # Buffer should remain empty (DMs don't use buffer)
+        msgs = await buf.get_all("line:U123")
+        assert len(msgs) == 0

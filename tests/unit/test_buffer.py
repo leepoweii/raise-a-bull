@@ -170,3 +170,68 @@ class TestReadBufferTime:
         (config_dir / "settings.json").write_text(json.dumps({"other_key": 99}))
         result = MessageBuffer.read_buffer_time(str(tmp_path))
         assert result == 10
+
+
+# ---------------------------------------------------------------------------
+# TestPerChannelLock
+# ---------------------------------------------------------------------------
+
+class TestPerChannelLock:
+    @pytest.mark.asyncio
+    async def test_lock_serializes_access(self):
+        """Two concurrent tasks on the same channel should execute sequentially."""
+        import asyncio
+
+        # Simulate the per-channel lock pattern from discord_bot.py
+        locks: dict[str, asyncio.Lock] = {}
+
+        def get_lock(key: str) -> asyncio.Lock:
+            if key not in locks:
+                locks[key] = asyncio.Lock()
+            return locks[key]
+
+        execution_order = []
+
+        async def task(name: str, key: str):
+            async with get_lock(key):
+                execution_order.append(f"{name}_start")
+                await asyncio.sleep(0.05)  # simulate work
+                execution_order.append(f"{name}_end")
+
+        # Two tasks on SAME channel — should serialize
+        t1 = asyncio.create_task(task("A", "ch:1"))
+        await asyncio.sleep(0.01)  # ensure A starts first
+        t2 = asyncio.create_task(task("B", "ch:1"))
+        await asyncio.gather(t1, t2)
+
+        # A must complete before B starts
+        assert execution_order == ["A_start", "A_end", "B_start", "B_end"]
+
+    @pytest.mark.asyncio
+    async def test_different_channels_not_blocked(self):
+        """Two concurrent tasks on different channels should run in parallel."""
+        import asyncio
+
+        locks: dict[str, asyncio.Lock] = {}
+
+        def get_lock(key: str) -> asyncio.Lock:
+            if key not in locks:
+                locks[key] = asyncio.Lock()
+            return locks[key]
+
+        execution_order = []
+
+        async def task(name: str, key: str):
+            async with get_lock(key):
+                execution_order.append(f"{name}_start")
+                await asyncio.sleep(0.05)
+                execution_order.append(f"{name}_end")
+
+        # Two tasks on DIFFERENT channels — should overlap
+        t1 = asyncio.create_task(task("A", "ch:1"))
+        t2 = asyncio.create_task(task("B", "ch:2"))
+        await asyncio.gather(t1, t2)
+
+        # Both should start before either ends
+        assert execution_order[0] == "A_start"
+        assert "B_start" in execution_order[:3]  # B starts before A ends

@@ -63,3 +63,36 @@ class TestLineMentionDetection:
             pass
 
         assert line_bot_is_mentioned(BrokenMention()) is False
+
+
+class TestLinePrefixTrigger:
+    def test_prefix_match_triggers(self):
+        """Message starting with trigger prefix should be detected."""
+        prefix = "小牛兒"
+        assert "小牛兒 你好".startswith(prefix) is True
+
+    def test_no_prefix_does_not_trigger(self):
+        """Message without prefix should not trigger."""
+        prefix = "小牛兒"
+        assert "你好小牛兒".startswith(prefix) is False
+
+    def test_prefix_strip(self):
+        """After stripping prefix, only the actual request remains."""
+        prefix = "小牛兒"
+        text = "小牛兒 幫我查天氣"
+        result = text[len(prefix):].strip()
+        assert result == "幫我查天氣"
+
+    def test_read_trigger_prefix_default(self):
+        """When no settings file exists, return default."""
+        from raisebull.webhook_line import _read_trigger_prefix
+        assert _read_trigger_prefix("/nonexistent/path") == "小牛兒"
+
+    def test_read_trigger_prefix_from_file(self, tmp_path):
+        """Read prefix from settings.json."""
+        import json
+        from raisebull.webhook_line import _read_trigger_prefix
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(json.dumps({"line_trigger_prefix": "牛牛"}))
+        assert _read_trigger_prefix(str(tmp_path)) == "牛牛"
