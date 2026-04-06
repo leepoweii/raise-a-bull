@@ -76,10 +76,12 @@ async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=
 
     key = "heartbeat:system"
     session = await sessions.get(key)
-    session_id = session["session_id"] if session else None
 
     try:
-        result = await runner.run(prompt, session_id=session_id, timeout_seconds=600.0)
+        # Fresh start each tick — no session persistence for heartbeat.
+        # Prevents token accumulation (heartbeat pushes results to channels,
+        # so conversation history is not needed across ticks).
+        result = await runner.run(prompt, session_id=None, timeout_seconds=600.0)
         if result.error:
             logger.error("Heartbeat error: %s", result.error)
             return
