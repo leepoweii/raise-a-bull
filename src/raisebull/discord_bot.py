@@ -11,15 +11,18 @@ Traces: progressive thread messages (one per thinking/tool phase).
 from __future__ import annotations
 
 import asyncio
+import asyncio as _asyncio
 import logging
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from time import time
 from typing import Optional
 
 import discord
 from discord.ext import commands
 
+from raisebull.buffer import MessageBuffer
 from raisebull.runner import ClaudeRunner, RunResult
 from raisebull.session import SessionStore
 from raisebull.trace import TraceStep
@@ -183,6 +186,26 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
     channel_states: dict[str, ChannelState] = {}
     _vision_client = create_vision_client()
 
+    _channel_locks: dict[str, _asyncio.Lock] = {}
+    _message_buffer: MessageBuffer | None = None
+
+    def _get_lock(key: str) -> _asyncio.Lock:
+        if key not in _channel_locks:
+            _channel_locks[key] = _asyncio.Lock()
+        return _channel_locks[key]
+
+    @bot.event
+    async def on_ready() -> None:
+        nonlocal _message_buffer
+        db_path = os.environ.get("DB_PATH", "/app/data/sessions.db")
+        _message_buffer = MessageBuffer(db_path)
+        await _message_buffer.init()
+        for guild_id in guild_ids:
+            guild = discord.Object(id=guild_id)
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+        print(f"Bot ready as {bot.user}")
+
     @bot.event
     async def on_message(message: discord.Message) -> None:
         if message.author.bot:
@@ -195,20 +218,44 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
         state = channel_states.setdefault(key, ChannelState())
         mentioned = bot.user in message.mentions if bot.user else False
 
+        # === SILENT MODE: buffer and return ===
         if not should_respond(state, mentioned):
+            if _message_buffer:
+                content = message.content
+                if bot.user:
+                    content = content.replace(f"<@{bot.user.id}>", "").strip()
+                author = message.author.display_name or message.author.name
+                await _message_buffer.insert(key, author, content or "", time())
+                # Process attachments immediately in silent mode
+                for att in message.attachments:
+                    try:
+                        file_bytes = await att.read()
+                        filepath, preview = await process_attachment(
+                            file_bytes, att.filename, att.content_type or "",
+                            session_id=key, workspace=runner.workspace,
+                            vision_client=_vision_client,
+                        )
+                        await _message_buffer.insert(
+                            key, author,
+                            f"(附件: {filepath} — {preview[:100]})",
+                            time(), has_attachment=True,
+                        )
+                    except Exception:
+                        logger.exception("Silent mode: attachment processing failed")
             return
 
-        # Confirmed response — now mutate state
+        # === ACTIVE/MENTION MODE ===
         if mentioned:
             state.on_mention()
         else:
             state.on_message()
 
-        prompt = message.content
+        # Build raw text from message
+        raw_text = message.content
         if bot.user:
-            prompt = prompt.replace(f"<@{bot.user.id}>", "").strip()
-        if not prompt and not message.attachments:
-            prompt = "Hello"
+            raw_text = raw_text.replace(f"<@{bot.user.id}>", "").strip()
+        if not raw_text and not message.attachments:
+            raw_text = "Hello"
 
         # Process attachments
         attachment_parts = []
@@ -230,112 +277,129 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
                 attachment_parts.append(f"(附件 {att.filename} 處理失敗)")
 
         if attachment_parts:
-            prompt = "\n\n---\n\n".join(attachment_parts) + "\n\n" + (prompt or "")
-            prompt = prompt.strip()
+            raw_text = "\n\n---\n\n".join(attachment_parts) + "\n\n" + (raw_text or "")
+            raw_text = raw_text.strip()
 
-        session = await sessions.get(key)
-        session_id: Optional[str] = session["session_id"] if session else None
+        # Build prompt: mention uses buffer, active mode uses datetime header only
+        if mentioned and _message_buffer:
+            buffer_time = MessageBuffer.read_buffer_time(runner.workspace or "/app/workspace")
+            prompt = await _message_buffer.build_prompt(key, raw_text, buffer_time_minutes=buffer_time)
+        else:
+            # Active mode: direct message with datetime header
+            dt = datetime.now(timezone.utc).astimezone()
+            prompt = f"現在時間：{dt.strftime('%Y-%m-%d %H:%M')} ({dt.strftime('%A')})\n\n{raw_text}"
 
-        try:
-            # Eager placeholder + thread creation
-            reply_msg = await message.reply("⏳")
-            thread: Optional[discord.Thread] = None
-            tracer: Optional[ThreadTracer] = None
+        # NOTE: Lock is held for the entire LLM call duration (up to 300s).
+        # This is intentional — it serializes messages per channel, preventing
+        # concurrent LLM calls that would produce duplicate/conflicting responses.
+        async with _get_lock(key):
+            # Get session inside the lock to ensure serialized access
+            session = await sessions.get(key)
+            session_id: Optional[str] = session["session_id"] if session else None
+
             try:
-                from datetime import datetime
-                thread = await reply_msg.create_thread(
-                    name=f"🧠 Trace {datetime.now().strftime('%H:%M')}",
-                    auto_archive_duration=60,
-                )
-                tracer = ThreadTracer(thread)
-            except discord.Forbidden:
-                logger.warning("Cannot create trace thread — missing permissions")
+                # Eager placeholder + thread creation
+                reply_msg = await message.reply("⏳")
+                thread: Optional[discord.Thread] = None
+                tracer: Optional[ThreadTracer] = None
+                try:
+                    thread = await reply_msg.create_thread(
+                        name=f"🧠 Trace {datetime.now().strftime('%H:%M')}",
+                        auto_archive_duration=60,
+                    )
+                    tracer = ThreadTracer(thread)
+                except discord.Forbidden:
+                    logger.warning("Cannot create trace thread — missing permissions")
 
-            # Coalescing buffer (edits placeholder on first flush)
-            first_edit = True
+                # Coalescing buffer (edits placeholder on first flush)
+                first_edit = True
 
-            async def send_or_edit(text: str):
-                nonlocal first_edit
-                if first_edit:
-                    first_edit = False
-                    await reply_msg.edit(content=text)
-                    return reply_msg
-                else:
-                    return await message.channel.send(text)
+                async def send_or_edit(text: str):
+                    nonlocal first_edit
+                    if first_edit:
+                        first_edit = False
+                        await reply_msg.edit(content=text)
+                        return reply_msg
+                    else:
+                        return await message.channel.send(text)
 
-            buffer = StreamBuffer(config=CoalesceConfig(), send_fn=send_or_edit)
+                buffer = StreamBuffer(config=CoalesceConfig(), send_fn=send_or_edit)
 
-            # Idle checker
-            idle_running = True
+                # Idle checker
+                idle_running = True
 
-            async def idle_checker():
-                while idle_running:
-                    await asyncio.sleep(buffer.config.idle_ms / 1000.0)
-                    await buffer.check_idle()
+                async def idle_checker():
+                    while idle_running:
+                        await asyncio.sleep(buffer.config.idle_ms / 1000.0)
+                        await buffer.check_idle()
 
-            idle_task = asyncio.create_task(idle_checker())
+                idle_task = asyncio.create_task(idle_checker())
 
-            async def on_trace(step: TraceStep) -> None:
-                if step.step_type == "text":
-                    await buffer.append(step.content)
-                elif tracer is not None:
-                    await tracer.on_step(step)
+                async def on_trace(step: TraceStep) -> None:
+                    if step.step_type == "text":
+                        await buffer.append(step.content)
+                    elif tracer is not None:
+                        await tracer.on_step(step)
 
-            # Run with inline stale session recovery
-            async def run_with_trace():
-                nonlocal first_edit
-                result = await runner.run(
-                    prompt, session_id=session_id,
-                    on_trace=on_trace, timeout_seconds=300.0,
-                )
-                if result.stale_session:
-                    logger.info("Stale session for %s — clearing and retrying", key)
-                    await sessions.clear(key)
-                    buffer.buffer = ""
-                    buffer.sent_text = ""
-                    buffer.current_message = None
-                    first_edit = True
-                    await reply_msg.edit(content="⏳")
+                # Run with inline stale session recovery
+                async def run_with_trace():
+                    nonlocal first_edit
                     result = await runner.run(
-                        prompt, session_id=None,
+                        prompt, session_id=session_id,
                         on_trace=on_trace, timeout_seconds=300.0,
                     )
-                effective_sid = result.session_id or session_id or ""
-                return result, effective_sid
+                    if result.stale_session:
+                        logger.info("Stale session for %s — clearing and retrying", key)
+                        await sessions.clear(key)
+                        buffer.buffer = ""
+                        buffer.sent_text = ""
+                        buffer.current_message = None
+                        first_edit = True
+                        await reply_msg.edit(content="⏳")
+                        result = await runner.run(
+                            prompt, session_id=None,
+                            on_trace=on_trace, timeout_seconds=300.0,
+                        )
+                    effective_sid = result.session_id or session_id or ""
+                    return result, effective_sid
 
-            async with message.channel.typing():
-                result, effective_sid = await run_with_trace()
+                async with message.channel.typing():
+                    result, effective_sid = await run_with_trace()
 
-            # Stop idle checker
-            idle_running = False
-            idle_task.cancel()
-            try:
-                await idle_task
-            except asyncio.CancelledError:
-                pass
+                # Stop idle checker
+                idle_running = False
+                idle_task.cancel()
+                try:
+                    await idle_task
+                except asyncio.CancelledError:
+                    pass
 
-            # Check error BEFORE finalizing buffer
-            if result.error:
-                await reply_msg.edit(content=f"⚠️ {result.error}")
-                return
+                # Check error BEFORE finalizing buffer
+                if result.error:
+                    await reply_msg.edit(content=f"⚠️ {result.error}")
+                    return
 
-            await buffer.finalize()
+                await buffer.finalize()
 
-            if first_edit and result.text:
-                await reply_msg.edit(content=result.text[:2000])
+                if first_edit and result.text:
+                    await reply_msg.edit(content=result.text[:2000])
 
-            existing_tokens = session["token_count"] if session else 0
-            await sessions.save(
-                key,
-                session_id=effective_sid,
-                domain=domain,
-                token_count=existing_tokens + (result.input_tokens or 0) + (result.output_tokens or 0),
-                name=channel_name,
-            )
+                existing_tokens = session["token_count"] if session else 0
+                await sessions.save(
+                    key,
+                    session_id=effective_sid,
+                    domain=domain,
+                    token_count=existing_tokens + (result.input_tokens or 0) + (result.output_tokens or 0),
+                    name=channel_name,
+                )
 
-        except Exception:
-            logger.exception("Error in on_message for %s", key)
-            await message.reply("⚠️ 出了點問題，請再試一次。")
+                # After successful reply, clear buffer (content is now in conversation history)
+                if mentioned and _message_buffer:
+                    await _message_buffer.delete_channel(key)
+
+            except Exception:
+                logger.exception("Error in on_message for %s", key)
+                await message.reply("⚠️ 出了點問題，請再試一次。")
 
         await bot.process_commands(message)
 
@@ -397,14 +461,6 @@ def create_bot(runner: ClaudeRunner, sessions: SessionStore) -> commands.Bot:
             token_count=existing_tokens + (result.input_tokens or 0) + (result.output_tokens or 0),
         )
         await interaction.followup.send(result.text or "Compacted.", ephemeral=True)
-
-    @bot.event
-    async def on_ready() -> None:
-        for guild_id in guild_ids:
-            guild = discord.Object(id=guild_id)
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
-        print(f"Bot ready as {bot.user}")
 
     return bot
 
