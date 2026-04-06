@@ -18,6 +18,8 @@ _ALLOWED_KEYS: dict[str, tuple[str, str | None]] = {
     "auto_reply_timeout": ("180", "AUTO_REPLY_TIMEOUT"),
     "session_idle_timeout": ("1800", "SESSION_IDLE_TIMEOUT"),
     "heartbeat_interval": ("1800", "HEARTBEAT_INTERVAL"),
+    "buffer_time": ("10", "BUFFER_TIME"),
+    "nightly_compact_hour": ("3", "NIGHTLY_COMPACT_HOUR"),
 }
 
 

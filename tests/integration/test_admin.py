@@ -209,7 +209,7 @@ class TestSettings:
         resp = await client.get("/admin/api/settings")
         assert resp.status_code == 200
         data = resp.json()
-        expected_keys = {"agent_name", "model", "max_steps", "auto_reply_timeout", "session_idle_timeout", "heartbeat_interval"}
+        expected_keys = {"agent_name", "model", "max_steps", "auto_reply_timeout", "session_idle_timeout", "heartbeat_interval", "buffer_time", "nightly_compact_hour"}
         assert set(data.keys()) == expected_keys
         for key, val in data.items():
             assert isinstance(val, str), f"Setting {key} should be string, got {type(val)}"
