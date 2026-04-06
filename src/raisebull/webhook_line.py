@@ -6,9 +6,15 @@ the token has expired (LINE reply token TTL is ~30 s; Claude may take longer for
 Session scoping:
   - Group chat  → session_key = line:group:{group_id}, prompt prefixed with speaker user_id
   - DM (1:1)    → session_key = line:{user_id}, prompt sent as-is
+
+Buffer behaviour:
+  - Group chat + not @mentioned → buffer message, return early (no LLM call)
+  - Group chat + @mentioned     → build prompt from buffer, LLM call, clear buffer
+  - DM                          → always respond immediately (no buffer)
 """
 from __future__ import annotations
 
+import asyncio as _asyncio
 import logging
 import os
 from typing import TYPE_CHECKING
@@ -26,6 +32,7 @@ if TYPE_CHECKING:
     from linebot.v3.webhooks import MessageEvent
     from linebot.v3.messaging import MessagingApi
 
+    from raisebull.buffer import MessageBuffer
     from raisebull.runner import ClaudeRunner
     from raisebull.session import SessionStore
 
@@ -35,6 +42,32 @@ from raisebull.discord_bot import _run_with_recovery  # noqa: E402
 
 
 _LINE_COMMANDS = {"/new", "/info", "/compact"}
+
+# ---------------------------------------------------------------------------
+# Per-channel asyncio locks (prevent interleaved group processing)
+# ---------------------------------------------------------------------------
+
+_line_locks: dict[str, _asyncio.Lock] = {}
+
+
+def _get_line_lock(key: str) -> _asyncio.Lock:
+    if key not in _line_locks:
+        _line_locks[key] = _asyncio.Lock()
+    return _line_locks[key]
+
+
+# ---------------------------------------------------------------------------
+# @mention detection
+# ---------------------------------------------------------------------------
+
+def line_bot_is_mentioned(mention) -> bool:
+    """Return True if the bot itself was @mentioned in a LINE message."""
+    if not mention:
+        return False
+    for m in getattr(mention, "mentionees", []):
+        if getattr(m, "is_self", False):
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -129,19 +162,63 @@ async def handle_line_message(
     runner: "ClaudeRunner",
     sessions: "SessionStore",
     messaging_api: "MessagingApi",
+    buffer: "MessageBuffer | None" = None,
 ) -> None:
-    """Dispatcher: resolve context, handle commands, then process message."""
+    """Dispatcher: resolve context, handle commands, then process message.
+
+    Group chat behaviour (requires buffer):
+      - Not @mentioned → insert into buffer, return (no LLM call).
+      - @mentioned     → build prompt from buffer + mention text, call LLM,
+                         then clear the buffer.
+    DM behaviour: always call LLM immediately (buffer is bypassed).
+    """
+    from time import time as _time
+
     user_id: str = event.source.user_id
     session_key, prompt, chat_id = _resolve_context(event)
+    raw_text: str = event.message.text.strip()
 
     # Fast path: Rich Menu commands (no Claude invocation)
-    if event.message.text.strip().lower() in _LINE_COMMANDS:
+    if raw_text.lower() in _LINE_COMMANDS:
         await _handle_line_command(
             event.message.text, session_key,
             event.reply_token, chat_id, sessions, runner, messaging_api,
         )
         return
 
+    is_group = event.source.type == "group"
+
+    if is_group and buffer is not None:
+        mention = getattr(event.message, "mention", None)
+        is_mentioned = line_bot_is_mentioned(mention)
+
+        if not is_mentioned:
+            # Silent: buffer only, no LLM
+            await buffer.insert(session_key, user_id, raw_text, _time())
+            return
+
+        # Active: collect @mention text (strip the mention markup if possible)
+        mention_text = _strip_self_mention(raw_text, mention)
+
+        async with _get_line_lock(session_key):
+            buffer_time = buffer.read_buffer_time(runner.workspace)
+            full_prompt = await buffer.build_prompt(
+                session_key, mention_text, buffer_time_minutes=buffer_time
+            )
+            await _process_message(
+                prompt=full_prompt,
+                session_key=session_key,
+                chat_id=chat_id,
+                user_id=user_id,
+                reply_token=event.reply_token,
+                runner=runner,
+                sessions=sessions,
+                messaging_api=messaging_api,
+            )
+            await buffer.delete_channel(session_key)
+        return
+
+    # DM (or group with no buffer configured): always respond immediately
     await _process_message(
         prompt=prompt,
         session_key=session_key,
@@ -152,6 +229,32 @@ async def handle_line_message(
         sessions=sessions,
         messaging_api=messaging_api,
     )
+
+
+def _strip_self_mention(text: str, mention) -> str:
+    """Remove the bot's own @mention token from text.
+
+    LINE mention objects carry an ``index`` (char offset) and ``length``
+    for each mentionee.  We remove self-mention spans so the LLM only
+    sees the actual question, not the raw @bot token.
+    """
+    if not mention:
+        return text
+    # Collect (index, length) for is_self mentionees, sorted reverse so we
+    # can splice from the end without disturbing earlier indices.
+    spans = sorted(
+        [
+            (getattr(m, "index", None), getattr(m, "length", None))
+            for m in getattr(mention, "mentionees", [])
+            if getattr(m, "is_self", False)
+            and getattr(m, "index", None) is not None
+            and getattr(m, "length", None) is not None
+        ],
+        reverse=True,
+    )
+    for start, length in spans:
+        text = text[:start] + text[start + length :]
+    return text.strip()
 
 
 async def _process_message(

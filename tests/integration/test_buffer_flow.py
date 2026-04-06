@@ -87,3 +87,54 @@ class TestBufferIntegration:
         assert "hello" in prompt
         today = datetime.now().strftime("%Y-%m-%d")
         assert today in prompt
+
+
+class TestLineBufferIntegration:
+    @pytest.mark.asyncio
+    async def test_line_group_non_mention_buffers(self, buf):
+        """LINE group message without mention should be buffered."""
+        await buf.insert("line:group:abc", "Alice", "hello group", time())
+        msgs = await buf.get_all("line:group:abc")
+        assert len(msgs) == 1
+        assert msgs[0]["content"] == "hello group"
+
+    @pytest.mark.asyncio
+    async def test_line_group_mention_builds_prompt(self, buf):
+        """LINE group @mention should build prompt with buffer context."""
+        now = time()
+        await buf.insert("line:group:abc", "Alice", "earlier", now - 120)
+        prompt = await buf.build_prompt("line:group:abc", "幫我查", buffer_time_minutes=10)
+        assert "earlier" in prompt
+        assert "幫我查" in prompt
+
+    @pytest.mark.asyncio
+    async def test_line_group_buffer_cleared_after_reply(self, buf):
+        """Buffer for a LINE group should be cleared after bot processes mention."""
+        now = time()
+        await buf.insert("line:group:abc", "Alice", "msg1", now)
+        await buf.insert("line:group:abc", "Bob", "msg2", now)
+        await buf.delete_channel("line:group:abc")
+        assert await buf.get_all("line:group:abc") == []
+
+    @pytest.mark.asyncio
+    async def test_line_group_isolation_from_discord(self, buf):
+        """LINE group buffer is isolated from Discord channel buffer."""
+        await buf.insert("line:group:abc", "Alice", "line msg", time())
+        await buf.insert("discord:999", "Bob", "discord msg", time())
+        await buf.delete_channel("line:group:abc")
+
+        assert await buf.get_all("line:group:abc") == []
+        assert len(await buf.get_all("discord:999")) == 1
+
+    @pytest.mark.asyncio
+    async def test_line_dm_does_not_use_buffer(self, buf):
+        """LINE DM messages should not share a buffer with the same user's group."""
+        await buf.insert("line:user123", "user123", "dm message", time())
+        await buf.insert("line:group:grp1", "user123", "group message", time())
+
+        dm_msgs = await buf.get_all("line:user123")
+        grp_msgs = await buf.get_all("line:group:grp1")
+        assert len(dm_msgs) == 1
+        assert len(grp_msgs) == 1
+        assert dm_msgs[0]["content"] == "dm message"
+        assert grp_msgs[0]["content"] == "group message"

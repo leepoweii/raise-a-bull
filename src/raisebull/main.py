@@ -25,6 +25,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageCo
 
 import discord
 
+from raisebull.buffer import MessageBuffer
 from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
 from raisebull.discord_bot import run_discord_bot, get_bot
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 _sessions: SessionStore | None = None
 _runner: ClaudeRunner | None = None
+_message_buffer: MessageBuffer | None = None
 _heartbeat_push = None  # set in lifespan
 
 
@@ -51,7 +53,7 @@ _heartbeat_push = None  # set in lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _sessions, _runner, _heartbeat_push
+    global _sessions, _runner, _message_buffer, _heartbeat_push
 
     if not os.getenv("LINE_CHANNEL_SECRET"):
         raise RuntimeError("LINE_CHANNEL_SECRET must be set")
@@ -60,6 +62,9 @@ async def lifespan(app: FastAPI):
 
     _sessions = SessionStore(db_path=os.getenv("DB_PATH", "/app/data/sessions.db"))
     await _sessions.init()
+
+    _message_buffer = MessageBuffer(db_path=os.getenv("DB_PATH", "/app/data/sessions.db"))
+    await _message_buffer.init()
 
     _runner = ClaudeRunner(
         claude_bin=os.getenv("CLAUDE_BIN", "claude"),
@@ -105,6 +110,8 @@ async def lifespan(app: FastAPI):
 
     if _sessions is not None:
         await _sessions.close()
+    if _message_buffer is not None:
+        await _message_buffer.close()
     logger.info("raise-a-bull shutdown complete")
 
 
@@ -187,7 +194,8 @@ async def webhook_line(request: Request) -> Response:
                     continue
                 if isinstance(event.message, TextMessageContent):
                     await handle_line_message(
-                        event, _runner, _sessions, messaging_api
+                        event, _runner, _sessions, messaging_api,
+                        buffer=_message_buffer,
                     )
                 elif isinstance(event.message, (ImageMessageContent, FileMessageContent)):
                     await handle_line_attachment(
