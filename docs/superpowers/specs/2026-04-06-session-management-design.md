@@ -43,12 +43,14 @@ CREATE INDEX IF NOT EXISTS idx_buffer_channel ON message_buffer(channel_key);
 
 **On @mention** (or during active timeout window):
 1. `SELECT * FROM message_buffer WHERE channel_key = ? ORDER BY timestamp`
-2. Split by `buffer_time` setting (default 10 minutes):
-   - Older than buffer_time → truncate to last 2000 chars, prefix as "Earlier conversation"
-   - Within buffer_time → inject verbatim as "Recent conversation"
+2. Split by `buffer_time` setting (default 10 minutes) — for **display grouping only**, all buffer messages are injected:
+   - Older than buffer_time → grouped under "Earlier conversation" header
+   - Within buffer_time → grouped under "Recent conversation" header
+   - All messages are included verbatim (no truncation for typical workgroup volume)
 3. Append current mention text as "User request"
-4. `runner.run(combined_prompt, session_id=existing)`
-5. After reply: `DELETE FROM message_buffer WHERE channel_key = ?`
+4. Prepend current datetime for agent time awareness
+5. `runner.run(combined_prompt, session_id=existing)`
+6. After reply: `DELETE FROM message_buffer WHERE channel_key = ?`
 
 ### Three-tier Mode (unchanged logic, new buffer)
 
@@ -61,22 +63,31 @@ Mention → accumulate to buffer + respond (LLM call) + enter active mode
 ### Prompt Format
 
 ```
-以下是頻道較早的對話（摘要）：
-...(earlier messages, truncated to 2000 chars)
+現在時間：2026-04-06 14:30 (Sunday)
+
+以下是頻道稍早的對話：
+[14:00] Alice: 今天開會要討論什麼？
+[14:01] Bob: 討論下週活動場地
 
 ---
 
 以下是最近 10 分鐘的對話：
-[Alice] 今天開會要討論什麼？
-[Bob] 討論下週活動場地
-[Alice] 場地要先預約嗎
-[Bob] 對，要先問社區
+[14:05] Alice: 場地要先預約嗎
+[14:26] Bob: 對，要先問社區
 
 ---
 
 用戶提到你：
-[Alice] 幫我整理一下剛才的討論重點
+[14:30] Alice: 幫我整理一下剛才的討論重點
 ```
+
+### Datetime Injection
+
+Every prompt (on @mention or active-mode response) starts with:
+```
+現在時間：{YYYY-MM-DD HH:MM} ({weekday})
+```
+This gives the agent time awareness for scheduling, deadlines, and contextual responses. Uses the server's timezone (Asia/Taipei).
 
 ---
 
@@ -227,9 +238,10 @@ Criteria for compacting a session:
 - Has new messages since `last_compacted_at` (or `last_compacted_at` is NULL)
 
 For each eligible session:
-1. `runner.run("/compact", session_id=session_id)`
-2. Update `last_compacted_at` in sessions DB
-3. Also compact any remaining unprocessed buffer entries for that channel into the session
+1. Check if buffer has unprocessed messages for this channel — if so, inject them into a prompt first (so they become part of the session before compacting)
+2. `runner.run("/compact", session_id=session_id)`
+3. Update `last_compacted_at` in sessions DB
+4. Hard delete the buffer entries for this channel (they are now in the compacted session)
 
 ### Step 2: Consolidate
 
