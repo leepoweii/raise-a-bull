@@ -328,3 +328,62 @@ async def test_attachment_docx_parse_and_read(runner: ClaudeRunner, tmp_path):
     )
     assert result.error is None, f"LLM error: {result.error}"
     assert "報告" in result.text or "週三" in result.text, f"Expected decision in: {result.text}"
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_buffer_prompt_with_real_llm(runner: ClaudeRunner, tmp_path):
+    """Smoke: buffer messages → build prompt → LLM understands context and answers correctly.
+
+    NOTE: Creates a separate ClaudeRunner with workspace=tmp_path so the buffer DB
+    lives in the same workspace the LLM can access via Read tool.
+    """
+    from raisebull.buffer import MessageBuffer
+    from time import time
+
+    buf = MessageBuffer(str(tmp_path / "buf.db"))
+    await buf.init()
+
+    now = time()
+    await buf.insert("test:ch", "Alice", "今天要討論預算", now - 120)
+    await buf.insert("test:ch", "Bob", "預算大約五萬", now - 60)
+
+    prompt = await buf.build_prompt("test:ch", "剛才說的預算是多少？只回答數字。", buffer_time_minutes=10)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+    )
+    result = await r.run(prompt, timeout_seconds=60.0)
+    assert result.error is None, f"LLM error: {result.error}"
+    assert "五萬" in result.text or "50000" in result.text or "5万" in result.text or "50,000" in result.text, \
+        f"Expected budget amount in: {result.text}"
+
+    await buf.close()
+
+
+@smoke
+@pytest.mark.asyncio
+async def test_buffer_prompt_datetime_visible_to_llm(runner: ClaudeRunner, tmp_path):
+    """Smoke: LLM can read the datetime header from buffer prompt."""
+    from raisebull.buffer import MessageBuffer
+    from datetime import datetime
+
+    buf = MessageBuffer(str(tmp_path / "buf.db"))
+    await buf.init()
+
+    prompt = await buf.build_prompt("test:ch", "現在是幾月幾號？只回答日期。", buffer_time_minutes=10)
+
+    r = ClaudeRunner(
+        claude_bin=runner.claude_bin,
+        workspace=str(tmp_path),
+        model=runner.model,
+    )
+    result = await r.run(prompt, timeout_seconds=60.0)
+    assert result.error is None, f"LLM error: {result.error}"
+    today = datetime.now().strftime("%m")
+    assert today in result.text or str(int(today)) in result.text, \
+        f"Expected current month in: {result.text}"
+
+    await buf.close()
