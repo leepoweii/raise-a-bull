@@ -1370,8 +1370,15 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer: 
             logger.error("Compact failed for %s: %s", key, result.error)
             continue
 
-        # Step 3: update DB
+        # Step 3: update DB — save new session_id (compact may return a new UUID)
+        # and set last_compacted_at. Without updating session_id, the next --resume
+        # would use the old UUID and trigger a stale-session error.
         now = datetime.now(timezone.utc).isoformat()
+        new_session_id = result.session_id or session_id
+        await sessions.save(
+            key, session_id=new_session_id, domain=s["domain"],
+            token_count=result.input_tokens or s["token_count"],
+        )
         await sessions.update_compacted_at(key, now)
 
     # Step 4: consolidate — one LLM call to update memory
