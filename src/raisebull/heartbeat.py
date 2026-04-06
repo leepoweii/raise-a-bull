@@ -87,9 +87,9 @@ async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=
             return
 
         await sessions.save(
-            key, session_id=result.session_id or session_id or "",
+            key, session_id=result.session_id or "",
             domain="heartbeat",
-            token_count=(session["token_count"] if session else 0) + (result.input_tokens or 0) + (result.output_tokens or 0),
+            token_count=(result.input_tokens or 0) + (result.output_tokens or 0),
             name="Heartbeat",
         )
 
