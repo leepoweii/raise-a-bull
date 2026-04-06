@@ -201,6 +201,7 @@ async def handle_line_message(
         return
 
     is_group = event.source.type == "group"
+    logger.info("LINE msg: group=%s, text=%r, buffer=%s", is_group, raw_text[:50], buffer is not None)
 
     if is_group and buffer is not None:
         mention = getattr(event.message, "mention", None)
@@ -210,6 +211,7 @@ async def handle_line_message(
         # Reads line_trigger_prefix from settings (default: "小牛兒")
         trigger_prefix = _read_trigger_prefix(runner.workspace)
         prefix_triggered = raw_text.startswith(trigger_prefix) if trigger_prefix else False
+        logger.info("LINE trigger: mentioned=%s, prefix=%r, triggered=%s", is_mentioned, trigger_prefix, prefix_triggered)
 
         if not is_mentioned and not prefix_triggered:
             # Silent: buffer only, no LLM
