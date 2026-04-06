@@ -805,8 +805,17 @@ async def handle_line_message(
                 buffer_time = int(json.load(f).get("buffer_time", "10"))
         except Exception:
             pass
-        # Strip the @mention text to get the actual request
-        mention_text = event.message.text.strip()
+        # Strip the @mention token from the text to get the actual request
+        # LINE mention has index + length fields we can use to remove the @BotName part
+        raw_text = event.message.text or ""
+        if event.message.mention and event.message.mention.mentionees:
+            for m in event.message.mention.mentionees:
+                if getattr(m, "is_self", False):
+                    idx = getattr(m, "index", 0)
+                    length = getattr(m, "length", 0)
+                    raw_text = (raw_text[:idx] + raw_text[idx + length:]).strip()
+                    break
+        mention_text = raw_text.strip() or "Hello"
         prompt = await buffer.build_prompt(session_key, mention_text, buffer_time_minutes=buffer_time)
 
         await _process_message(
@@ -1285,7 +1294,10 @@ class TestCompactEligibility:
 
 - [ ] **Step 2: Add list_all() to SessionStore**
 
-Before implementing `nightly_compact()`, add a `list_all()` method to `src/raisebull/session.py`. The nightly job needs to iterate all sessions — using a public method avoids accessing `sessions._require_db()` directly (a private implementation detail).
+Before implementing `nightly_compact()`, add two methods to `src/raisebull/session.py`:
+
+1. `list_all()` — iterates all sessions (avoids accessing `_require_db()` directly)
+2. `update_compacted_at()` — updates `last_compacted_at` timestamp after compact
 
 ```python
     async def list_all(self) -> list[dict]:
@@ -1295,9 +1307,17 @@ Before implementing `nightly_compact()`, add a `list_all()` method to `src/raise
             "FROM sessions"
         ) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
+
+    async def update_compacted_at(self, key: str, timestamp: str) -> None:
+        """Set last_compacted_at for a session. Called after nightly compact."""
+        await self._require_db().execute(
+            "UPDATE sessions SET last_compacted_at = ? WHERE key = ?",
+            (timestamp, key),
+        )
+        await self._require_db().commit()
 ```
 
-Then update the `nightly_compact()` implementation to use `sessions.list_all()` instead of raw DB access.
+The nightly compact uses `sessions.list_all()` and `sessions.update_compacted_at()` — no direct `_require_db()` access from outside SessionStore.
 
 - [ ] **Step 3: Implement compact eligibility + nightly job**
 
@@ -1350,15 +1370,9 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer: 
             logger.error("Compact failed for %s: %s", key, result.error)
             continue
 
-        # Step 3: update DB — use _require_db() since SessionStore has no update_compacted_at()
-        # (acceptable: this is internal heartbeat code, not user-facing)
+        # Step 3: update DB
         now = datetime.now(timezone.utc).isoformat()
-        db = sessions._require_db()
-        await db.execute(
-            "UPDATE sessions SET last_compacted_at = ? WHERE key = ?",
-            (now, key),
-        )
-        await db.commit()
+        await sessions.update_compacted_at(key, now)
 
     # Step 4: consolidate — one LLM call to update memory
     summary_parts = []
