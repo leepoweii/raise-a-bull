@@ -48,6 +48,8 @@ window.chatPage = function() {
                 const history = await this.getApp().api(
                     '/api/chat/' + encodeURIComponent(sid) + '/history'
                 );
+                // Guard against stale response if user switched sessions during await
+                if (this.currentSession !== sid) return;
                 if (Array.isArray(history)) {
                     for (const msg of history) {
                         this.messages.push(msg);
