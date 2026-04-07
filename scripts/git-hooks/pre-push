@@ -21,12 +21,96 @@ echo "🧪 Running all tests before push..."
 echo "--- Fast tests (unit + integration + root) ---"
 .venv/bin/pytest tests/ --ignore=tests/e2e --ignore=tests/smoke -q --tb=short
 
-# E2E tests skipped here — Task 2 will add them
-if command -v npx > /dev/null 2>&1 && [ -f "playwright.config.ts" ]; then
+# E2E tests (Playwright) — auto-spawn uvicorn fixture, run LLM-free tests, tear down.
+# Trap guarantees cleanup runs even if pytest/playwright/curl fails under set -e.
+# SKIP_LLM_E2E=1 makes Web Chat + File Upload describes auto-skip (those need
+# a real authenticated `claude` CLI and cost real tokens — run manually instead).
+# Set SKIP_E2E=1 to bypass the entire e2e block for emergency pushes.
+if [ "$SKIP_E2E" = "1" ]; then
     echo ""
     echo "--- E2E tests (Playwright) ---"
-    echo "⚠️  E2E tests require a running server. Skipping in pre-push."
-    echo "   Run manually: npx playwright test"
+    echo "⚠️  Skipped via SKIP_E2E=1"
+elif command -v npx > /dev/null 2>&1 && [ -f "playwright.config.ts" ]; then
+    echo ""
+    echo "--- E2E tests (Playwright, LLM-free subset) ---"
+
+    # Port collision pre-check — if anything is already on 8766 (matches the
+    # port playwright.config.ts expects), bail with a clear error rather than
+    # silently running playwright against the wrong server.
+    if lsof -ti:8766 > /dev/null 2>&1; then
+        EXISTING_PID=$(lsof -ti:8766)
+        echo "❌ Port 8766 is already in use by PID(s): $EXISTING_PID"
+        echo "   Either kill the existing process (lsof -ti:8766 then kill <pid>)"
+        echo "   or skip e2e for this push: SKIP_E2E=1 git push"
+        exit 1
+    fi
+
+    # Reserve a temp workspace + uvicorn pid placeholder
+    TMP_WS=$(mktemp -d)
+    UVICORN_PID=""
+
+    # Trap MUST be installed BEFORE the uvicorn spawn so an early failure
+    # (e.g., uvicorn doesn't start) still cleans up the tmpdir.
+    cleanup() {
+        if [ -n "$UVICORN_PID" ]; then
+            kill "$UVICORN_PID" 2>/dev/null || true
+            wait "$UVICORN_PID" 2>/dev/null || true
+        fi
+        rm -rf "$TMP_WS"
+    }
+    trap cleanup EXIT INT TERM
+
+    # Workspace fixture
+    mkdir -p "$TMP_WS/config" "$TMP_WS/heartbeat"
+    echo '{"nightly_compact_threshold":"50000"}' > "$TMP_WS/config/settings.json"
+    echo '## prepush' > "$TMP_WS/heartbeat/heartbeat.md"
+    echo '{}' > "$TMP_WS/heartbeat/last-run.json"
+
+    # Spawn uvicorn on 127.0.0.1:8766 (matches playwright.config.ts baseURL)
+    ADMIN_PASSWORD=demo123 \
+    LINE_CHANNEL_SECRET=dummy \
+    LINE_CHANNEL_ACCESS_TOKEN=dummy \
+    DISCORD_BOT_TOKEN= \
+    HEARTBEAT_INTERVAL=3600 \
+    WORKSPACE="$TMP_WS" \
+    DB_PATH="$TMP_WS/sessions.db" \
+    CREDENTIALS_DB_PATH="$TMP_WS/credentials.db" \
+    .venv/bin/python -m uvicorn raisebull.main:app \
+        --host 127.0.0.1 --port 8766 \
+        > "$TMP_WS/uvicorn.log" 2>&1 &
+    UVICORN_PID=$!
+
+    # Wait for /health (max 15s)
+    UVICORN_READY=0
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+        if curl -sS http://127.0.0.1:8766/health > /dev/null 2>&1; then
+            UVICORN_READY=1
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$UVICORN_READY" != "1" ]; then
+        echo "❌ uvicorn failed to start on :8766 within 15s"
+        echo "--- last 20 lines of $TMP_WS/uvicorn.log ---"
+        tail -20 "$TMP_WS/uvicorn.log" || true
+        exit 1   # trap fires and runs cleanup
+    fi
+
+    # Run the LLM-free subset. set +e around playwright so we capture the
+    # exit code instead of letting set -e abort before our message.
+    set +e
+    SKIP_LLM_E2E=1 npx playwright test --reporter=line
+    PLAYWRIGHT_EXIT=$?
+    set -e
+
+    if [ $PLAYWRIGHT_EXIT -ne 0 ]; then
+        echo "❌ Playwright tests failed. Push aborted."
+        echo "   Run full e2e manually: npx playwright test"
+        echo "   Skip e2e block:        SKIP_E2E=1 git push"
+        exit 1   # trap fires and runs cleanup
+    fi
+    # trap fires on normal exit too — uvicorn killed and tmpdir removed
 fi
 
 echo ""

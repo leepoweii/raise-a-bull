@@ -172,7 +172,7 @@ Local pre-push hook lives at `scripts/git-hooks/pre-push` (tracked) and runs the
 ./scripts/git-hooks/install.sh
 ```
 
-Skip the hook for emergency pushes: `git push --no-verify`. Do NOT skip routinely — the hook caught real bugs (fill('abc') Playwright crash, threshold validation regressions) during the nightly_compact feature work.
+The hook also auto-runs the LLM-free Playwright e2e subset (~5-15s) — it spawns a temporary uvicorn fixture on 127.0.0.1:8766 (with a port-collision pre-check), runs `SKIP_LLM_E2E=1 npx playwright test`, and tears down via a shell trap so cleanup runs even on test failure. The Web Chat + File Upload describes (10 tests) auto-skip via SKIP_LLM_E2E because they need a real authenticated `claude` CLI and cost real tokens — run them manually with `npx playwright test --grep "Web Chat|File Upload"`. Escape hatches: `SKIP_E2E=1 git push` skips the e2e block entirely, `git push --no-verify` skips the whole hook. Use sparingly — the hook caught real bugs (fill('abc') Playwright crash, threshold validation regressions) during the nightly_compact feature work.
 
 ---
 

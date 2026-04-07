@@ -197,6 +197,11 @@ test.describe('Settings Page', () => {
 });
 
 test.describe('Web Chat', () => {
+  test.skip(
+    process.env.SKIP_LLM_E2E === '1',
+    'Skipped via SKIP_LLM_E2E=1 — these tests need a real authenticated `claude` CLI and cost real tokens. Run manually with `npx playwright test --grep "Web Chat"`.'
+  );
+
   test.beforeEach(async ({ page }) => {
     await login(page);
     await page.click('a:has-text("Chat")');
@@ -278,6 +283,11 @@ test.describe('Web Chat', () => {
 });
 
 test.describe('File Upload', () => {
+  test.skip(
+    process.env.SKIP_LLM_E2E === '1',
+    'Skipped via SKIP_LLM_E2E=1 — these tests need a real authenticated `claude` CLI and cost real tokens. Run manually with `npx playwright test --grep "File Upload"`.'
+  );
+
   test.beforeEach(async ({ page }) => {
     await login(page);
     await page.click('a:has-text("Chat")');
