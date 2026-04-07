@@ -277,6 +277,20 @@ class TestPermissions:
         assert resp.status_code == 200
         assert resp.json()["available"] is False
 
+    @pytest.mark.asyncio
+    async def test_discord_channels_no_bot(self, client):
+        await _login(client)
+        resp = await client.get("/admin/api/permissions/discord-channels")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["available"] is False
+        assert body["channels"] == []
+
+    @pytest.mark.asyncio
+    async def test_discord_channels_requires_auth(self, client):
+        resp = await client.get("/admin/api/permissions/discord-channels")
+        assert resp.status_code == 401
+
 
 class TestModels:
     @pytest.mark.asyncio
