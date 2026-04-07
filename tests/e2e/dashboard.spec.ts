@@ -154,6 +154,43 @@ test.describe('Settings Page', () => {
       page.locator('[x-model="settings.nightly_compact_threshold"]')
     ).toHaveValue('50000');
   });
+
+  test('invalid threshold surfaces error toast', async ({ page }) => {
+    // Pin the contract: the generic app.js api() helper routes any response
+    // body with an `error` key to showToast(..., 'error'). The routes_settings.py
+    // 400 validator returns the canonical message. End-to-end: typing garbage
+    // into the threshold input and clicking Save must display that message in
+    // the toast — otherwise the user sees the Save button flash and has no
+    // idea why nothing happened.
+    //
+    // Previously settings.js:47 only handled result.ok (and ignored the null
+    // return from api() on 400), but app.js's api() helper already centralizes
+    // the showToast on data.error, so the toast DOES appear — this test locks
+    // that behavior in.
+    await page.click('a:has-text("Settings")');
+    const input = page.locator('[x-model="settings.nightly_compact_threshold"]');
+    await expect(input).toBeVisible();
+    await input.fill('abc');
+    await page.click('button:has-text("Save")');
+    // Toast element uses .toast class and is populated by app.js showToast().
+    // Must contain the canonical error message from routes_settings.py.
+    await expect(page.locator('.toast')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('.toast')).toContainText(
+      'nightly_compact_threshold must be a positive integer'
+    );
+    // Critically: .restart-notice must NOT appear — Alpine's saved=true only
+    // fires on a successful PUT, and a 400 should keep it false.
+    await expect(page.locator('.restart-notice')).not.toBeVisible();
+    // Clean up: restore a valid value via direct API so the sentinel "abc"
+    // never gets anywhere near settings.json (api() returned null, so the
+    // local Alpine state still shows "abc" but the file on disk is unchanged;
+    // reload to drop the local garbage)
+    await page.reload();
+    await page.click('a:has-text("Settings")');
+    await expect(
+      page.locator('[x-model="settings.nightly_compact_threshold"]')
+    ).not.toHaveValue('abc');
+  });
 });
 
 test.describe('Web Chat', () => {
