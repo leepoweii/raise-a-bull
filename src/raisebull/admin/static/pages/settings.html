@@ -35,6 +35,26 @@
                 <input type="number" x-model="settings.heartbeat_interval">
                 <div class="form-hint">How often the heartbeat scheduler pokes the agent</div>
             </div>
+            <div class="form-group">
+                <label>Buffer Time (seconds)</label>
+                <input type="number" x-model="settings.buffer_time">
+                <div class="form-hint">Discord/LINE message buffer accumulation window before flush on @mention or prefix trigger</div>
+            </div>
+            <div class="form-group">
+                <label>Nightly Compact Hour (0-23)</label>
+                <input type="number" min="0" max="23" x-model="settings.nightly_compact_hour">
+                <div class="form-hint">Hour of day (UTC) when the nightly compact cron job runs</div>
+            </div>
+            <div class="form-group">
+                <label>Nightly Compact Threshold (tokens)</label>
+                <input type="number" min="1" x-model="settings.nightly_compact_threshold">
+                <div class="form-hint">Sessions over this token count get compacted by the nightly cron. Must be a positive integer; runtime-configurable without restart</div>
+            </div>
+            <div class="form-group">
+                <label>LINE Trigger Prefix</label>
+                <input type="text" x-model="settings.line_trigger_prefix">
+                <div class="form-hint">Word LINE group members can prefix to address the bot (groups can't @mention bots)</div>
+            </div>
         </div>
 
         <button class="btn btn-primary" @click="save()" :disabled="saving"
