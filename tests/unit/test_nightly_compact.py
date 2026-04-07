@@ -112,3 +112,99 @@ class TestSessionStoreUpdateCompactedAt:
     async def test_update_compacted_at_nonexistent_key(self, store):
         # Should not raise, just 0 rows affected
         await store.update_compacted_at("nonexistent", "2026-04-07T03:00:00")
+
+
+class TestReadThreshold:
+    def test_default_when_no_settings_no_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_env_overrides_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "12345")
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 12345
+
+    def test_settings_json_overrides_env(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "12345")
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": "9999"})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 9999
+
+    def test_settings_int_value_works(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": 7777})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 7777
+
+    def test_zero_in_settings_falls_back_to_default(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": "0"})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_negative_in_settings_falls_back_to_default(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": "-100"})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_garbage_in_settings_falls_back_to_env(self, tmp_path, monkeypatch):
+        import json
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "8888")
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": "abc"})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 8888
+
+    def test_garbage_env_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "not-a-number")
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_zero_in_env_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "0")
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_negative_in_env_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "-50")
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 50000
+
+    def test_corrupted_settings_json_falls_back_to_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "6666")
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text("{ not valid json")
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 6666
+
+    def test_missing_workspace_directory_falls_back_to_default(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        nonexistent = tmp_path / "does-not-exist"
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(nonexistent)) == 50000

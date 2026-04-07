@@ -7,10 +7,12 @@ Channel messages ([#channel-name] prefix) are routed to Discord.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -41,6 +43,41 @@ def is_compact_eligible(
     if last_compacted and session["last_active"] <= last_compacted:
         return False  # No new activity since last compact
     return True
+
+
+def _coerce_threshold(value) -> int | None:
+    """Convert raw value to a positive int, or return None if invalid/non-positive."""
+    try:
+        n = int(str(value).strip())
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if n <= 0:
+        return None
+    return n
+
+
+def _read_threshold(workspace: str) -> int:
+    """Resolve nightly-compact threshold.
+
+    Precedence: settings.json > NIGHTLY_COMPACT_THRESHOLD env > 50000.
+    Invalid (non-numeric, zero, negative) values fall through to the next layer.
+    """
+    settings_path = Path(workspace) / "config" / "settings.json"
+    if settings_path.exists():
+        try:
+            stored = json.loads(settings_path.read_text(encoding="utf-8"))
+            from_settings = _coerce_threshold(stored.get("nightly_compact_threshold"))
+            if from_settings is not None:
+                return from_settings
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    from_env = _coerce_threshold(os.environ.get("NIGHTLY_COMPACT_THRESHOLD"))
+    if from_env is not None:
+        return from_env
+
+    return COMPACT_TOKEN_THRESHOLD
+
 
 _last_heartbeat_response: Optional[str] = None
 _last_heartbeat_time: Optional[float] = None
