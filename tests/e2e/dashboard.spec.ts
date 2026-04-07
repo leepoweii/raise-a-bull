@@ -137,10 +137,22 @@ test.describe('Settings Page', () => {
     const reloadedInput = page.locator('[x-model="settings.nightly_compact_threshold"]');
     await expect(reloadedInput).toHaveValue('31337');
     // Clean up: restore a sensible default so subsequent tests / live usage don't
-    // inherit the sentinel
+    // inherit the sentinel. We can't reuse the Save button + .restart-notice
+    // visibility check because the notice is already visible from the first
+    // save (Alpine's `saved` stays true), so a second `toBeVisible` returns
+    // immediately without proving the PUT finished. Instead, wait for the
+    // actual HTTP response to complete and then reload to confirm persistence.
     await reloadedInput.fill('50000');
+    const saveResponse = page.waitForResponse(
+      (resp) => resp.url().includes('/admin/api/settings') && resp.request().method() === 'PUT'
+    );
     await page.click('button:has-text("Save")');
-    await expect(page.locator('.restart-notice')).toBeVisible({ timeout: 5000 });
+    await saveResponse;
+    await page.reload();
+    await page.click('a:has-text("Settings")');
+    await expect(
+      page.locator('[x-model="settings.nightly_compact_threshold"]')
+    ).toHaveValue('50000');
   });
 });
 
