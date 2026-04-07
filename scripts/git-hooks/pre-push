@@ -1,0 +1,33 @@
+#!/bin/bash
+# Pre-push hook: run all tests before pushing
+# Skip with: git push --no-verify
+#
+# Lives at scripts/git-hooks/pre-push (tracked) — copied to .git/hooks/pre-push
+# by scripts/git-hooks/install.sh after clone.
+
+set -e
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "🧪 Running all tests before push..."
+
+# Fast tests: every test under tests/ except tests/e2e (Playwright) and
+# tests/smoke (real Claude API calls). This covers all unit, integration,
+# and root-level test files (test_session, test_runner, test_discord_bot,
+# test_recovery, test_main) — 293 tests total as of e6dea37.
+#
+# set -e makes pytest's non-zero exit abort the script immediately, so no
+# manual `if [ $? -ne 0 ]` check is needed.
+echo "--- Fast tests (unit + integration + root) ---"
+.venv/bin/pytest tests/ --ignore=tests/e2e --ignore=tests/smoke -q --tb=short
+
+# E2E tests skipped here — Task 2 will add them
+if command -v npx > /dev/null 2>&1 && [ -f "playwright.config.ts" ]; then
+    echo ""
+    echo "--- E2E tests (Playwright) ---"
+    echo "⚠️  E2E tests require a running server. Skipping in pre-push."
+    echo "   Run manually: npx playwright test"
+fi
+
+echo ""
+echo "✅ All tests passed. Pushing..."

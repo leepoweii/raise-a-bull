@@ -164,6 +164,16 @@ tests/
 Total: 293 fast + 16 smoke + 19 e2e
 ```
 
+### Git Hooks
+
+Local pre-push hook lives at `scripts/git-hooks/pre-push` (tracked) and runs the full fast test suite (293 tests, ~3s) before allowing a push. Install after clone with:
+
+```bash
+./scripts/git-hooks/install.sh
+```
+
+Skip the hook for emergency pushes: `git push --no-verify`. Do NOT skip routinely — the hook caught real bugs (fill('abc') Playwright crash, threshold validation regressions) during the nightly_compact feature work.
+
 ---
 
 ## Key Decisions
