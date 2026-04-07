@@ -1,4 +1,5 @@
 """Unit tests for nightly compact eligibility + SessionStore methods."""
+import asyncio
 import pytest
 import pytest_asyncio
 from raisebull.heartbeat import is_compact_eligible
@@ -263,3 +264,59 @@ class TestNightlyCompactThreshold:
         assert runner.run.call_count == 2
         first_call_prompt = runner.run.call_args_list[0].args[0]
         assert first_call_prompt == "/compact"
+
+    @pytest.mark.asyncio
+    async def test_concurrent_runs_serialize_via_lock(
+        self, store, tmp_path, monkeypatch
+    ):
+        """Two concurrent nightly_compact calls must not double-compact a session.
+
+        Without a lock: both runs see the session as eligible (token_count > threshold,
+        last_compacted_at is None) and both call runner.run for /compact + consolidate
+        → 4 runner.run calls total. With the lock: run 1 holds the lock, compacts the
+        session, releases. Run 2 takes the lock, sees the session is no longer eligible
+        (last_compacted_at is now set, last_active is unchanged), and exits early
+        without calling runner.run → 2 total calls.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "1000"}'
+        )
+
+        await store.save("web:hot", session_id="orig", domain="web", token_count=5000)
+
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+
+        async def slow_run(*args, **kwargs):
+            # Simulate a non-trivial Claude call so the two coroutines actually overlap
+            # in time if they're not serialized.
+            await asyncio.sleep(0.05)
+            return MagicMock(error=None, session_id="new-sid", output_tokens=900)
+
+        runner.run = AsyncMock(side_effect=slow_run)
+
+        # Fire two concurrent nightly_compact runs
+        await asyncio.gather(
+            nightly_compact(runner, store, buffer=None),
+            nightly_compact(runner, store, buffer=None),
+        )
+
+        # Run 1: 1× /compact + 1× consolidate = 2 runner.run calls.
+        # Run 2: lock blocks until Run 1 finishes; then Run 2 sees the now-compacted
+        # session as ineligible (last_compacted_at >= last_active) and exits before
+        # calling runner.run at all.
+        assert runner.run.call_count == 2, (
+            f"Expected serialized execution (2 calls), got {runner.run.call_count}. "
+            "Without the lock, both runs would each call /compact + consolidate = 4 calls."
+        )
+
+        # Sanity: the session was actually compacted exactly once
+        row = await store.get("web:hot")
+        assert row["session_id"] == "new-sid"
+        assert row["last_compacted_at"] is not None

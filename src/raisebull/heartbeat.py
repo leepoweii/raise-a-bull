@@ -28,6 +28,13 @@ HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "300"))
 MAX_DAILY_TRIGGERS = int(os.environ.get("MAX_DAILY_HEARTBEAT_TRIGGERS", "20"))
 COMPACT_TOKEN_THRESHOLD = 50_000
 
+# Serializes nightly_compact across cron + manual trigger callers.
+# APScheduler's max_instances=1 only protects the same job_id; the manual
+# /internal/nightly-compact/trigger endpoint dispatches via asyncio.create_task,
+# completely bypassing the scheduler. This module-level lock ensures cron and
+# trigger paths can never run nightly_compact concurrently on the same DB.
+_nightly_lock = asyncio.Lock()
+
 
 def is_compact_eligible(
     session: dict,
@@ -164,66 +171,71 @@ async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=
 
 
 async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=None) -> None:
-    """Run nightly compact + consolidate. Called by scheduler at configured hour."""
+    """Run nightly compact + consolidate. Called by scheduler at configured hour.
+
+    Serialized via _nightly_lock so concurrent invocations (cron + manual trigger)
+    can't double-compact the same session.
+    """
     from datetime import timezone
 
-    threshold = _read_threshold(runner.workspace or "/app/workspace")
+    async with _nightly_lock:
+        threshold = _read_threshold(runner.workspace or "/app/workspace")
 
-    all_sessions = await sessions.list_all()
-    eligible = [
-        s for s in all_sessions
-        if is_compact_eligible(s, key=s["key"], threshold=threshold)
-    ]
+        all_sessions = await sessions.list_all()
+        eligible = [
+            s for s in all_sessions
+            if is_compact_eligible(s, key=s["key"], threshold=threshold)
+        ]
 
-    if not eligible:
-        logger.info("Nightly compact: no eligible sessions (threshold=%d)", threshold)
-        return
+        if not eligible:
+            logger.info("Nightly compact: no eligible sessions (threshold=%d)", threshold)
+            return
 
-    for s in eligible:
-        key = s["key"]
-        session_id = s["session_id"]
-        logger.info("Nightly compact: %s (tokens=%d, threshold=%d)", key, s["token_count"], threshold)
+        for s in eligible:
+            key = s["key"]
+            session_id = s["session_id"]
+            logger.info("Nightly compact: %s (tokens=%d, threshold=%d)", key, s["token_count"], threshold)
 
-        # Step 1: inject unprocessed buffer into session
-        if buffer:
-            msgs = await buffer.get_all(key)
-            if msgs:
-                prompt = await buffer.build_prompt(key, "(nightly compact — injecting buffered messages)")
-                inject_result = await runner.run(prompt, session_id=session_id, timeout_seconds=300.0)
-                if not inject_result.error:
-                    # Only clear buffer once we know the injection succeeded
-                    await buffer.delete_channel(key)
-                    session_id = inject_result.session_id or session_id
-                else:
-                    logger.warning("Buffer injection failed for %s, keeping buffer: %s", key, inject_result.error)
+            # Step 1: inject unprocessed buffer into session
+            if buffer:
+                msgs = await buffer.get_all(key)
+                if msgs:
+                    prompt = await buffer.build_prompt(key, "(nightly compact — injecting buffered messages)")
+                    inject_result = await runner.run(prompt, session_id=session_id, timeout_seconds=300.0)
+                    if not inject_result.error:
+                        # Only clear buffer once we know the injection succeeded
+                        await buffer.delete_channel(key)
+                        session_id = inject_result.session_id or session_id
+                    else:
+                        logger.warning("Buffer injection failed for %s, keeping buffer: %s", key, inject_result.error)
 
-        # Step 2: compact
-        result = await runner.run("/compact", session_id=session_id, timeout_seconds=300.0)
-        if result.error:
-            logger.error("Compact failed for %s: %s", key, result.error)
-            continue
+            # Step 2: compact
+            result = await runner.run("/compact", session_id=session_id, timeout_seconds=300.0)
+            if result.error:
+                logger.error("Compact failed for %s: %s", key, result.error)
+                continue
 
-        # Step 3: update DB — save new session_id, then stamp last_compacted_at >= last_active
-        new_session_id = result.session_id or session_id
-        await sessions.save(
-            key, session_id=new_session_id, domain=s["domain"],
-            token_count=result.output_tokens or s["token_count"],
+            # Step 3: update DB — save new session_id, then stamp last_compacted_at >= last_active
+            new_session_id = result.session_id or session_id
+            await sessions.save(
+                key, session_id=new_session_id, domain=s["domain"],
+                token_count=result.output_tokens or s["token_count"],
+            )
+            # Capture timestamp AFTER save() so last_compacted_at >= last_active,
+            # preventing is_compact_eligible() from treating the compact itself as new activity.
+            now = datetime.now(timezone.utc).isoformat()
+            await sessions.update_compacted_at(key, now)
+
+        # Step 4: consolidate — one LLM call to update memory
+        summary_parts = [f"Session {s['key']}: {s['token_count']} tokens" for s in eligible]
+        consolidate_prompt = (
+            "你是記憶整理助理。以下 session 剛剛被 compact 了。\n"
+            "請讀取各 session 的最新狀態，整理重要資訊，更新 memory/ 目錄下的相關檔案。\n"
+            "你可以自行決定要寫入哪些檔案。\n\n"
+            + "\n".join(summary_parts)
         )
-        # Capture timestamp AFTER save() so last_compacted_at >= last_active,
-        # preventing is_compact_eligible() from treating the compact itself as new activity.
-        now = datetime.now(timezone.utc).isoformat()
-        await sessions.update_compacted_at(key, now)
-
-    # Step 4: consolidate — one LLM call to update memory
-    summary_parts = [f"Session {s['key']}: {s['token_count']} tokens" for s in eligible]
-    consolidate_prompt = (
-        "你是記憶整理助理。以下 session 剛剛被 compact 了。\n"
-        "請讀取各 session 的最新狀態，整理重要資訊，更新 memory/ 目錄下的相關檔案。\n"
-        "你可以自行決定要寫入哪些檔案。\n\n"
-        + "\n".join(summary_parts)
-    )
-    await runner.run(consolidate_prompt, session_id=None, timeout_seconds=600.0)
-    logger.info("Nightly consolidate complete")
+        await runner.run(consolidate_prompt, session_id=None, timeout_seconds=600.0)
+        logger.info("Nightly consolidate complete")
 
 
 def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, buffer=None) -> None:
