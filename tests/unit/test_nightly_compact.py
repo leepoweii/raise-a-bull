@@ -401,3 +401,196 @@ class TestNightlyCompactLogging:
         assert "threshold=1000" in caplog.text
         # Consolidate completion log must also appear so operators know the run finished
         assert "Nightly consolidate complete" in caplog.text
+
+
+class TestSessionStoreSaveWithCompactedAt:
+    """Verifies that SessionStore.save_with_compacted_at writes both session_id
+    and last_compacted_at in a single atomic statement, eliminating the
+    crash-recovery race where a SIGTERM between save() and update_compacted_at()
+    leaves the session with a fresh session_id but no compaction stamp.
+    """
+
+    @pytest_asyncio.fixture
+    async def store(self, tmp_path):
+        s = SessionStore(str(tmp_path / "test.db"))
+        await s.init()
+        yield s
+        await s.close()
+
+    @pytest.mark.asyncio
+    async def test_updates_session_id_and_compacted_at_preserves_last_active(self, store):
+        """The atomic UPDATE rotates session_id + token_count + domain + sets
+        last_compacted_at, but DOES NOT touch last_active. last_active is the
+        user-facing 'last real activity' timestamp displayed in
+        discord_bot.py:434, webhook_line.py:144, and used as created_at in
+        routes_chat.py:154 — touching it during a background compact would
+        shift those displays to the cron's 03:00 AM run time."""
+        # Pre-save creates the row with last_active = datetime.now() at save time
+        await store.save("web:test", session_id="orig-sid", domain="web", token_count=5000)
+        before = await store.get("web:test")
+        original_last_active = before["last_active"]
+        assert before["last_compacted_at"] is None  # baseline: not yet compacted
+
+        # Compact runs — atomic UPDATE of session_id + last_compacted_at
+        await store.save_with_compacted_at(
+            "web:test",
+            session_id="post-compact-sid",
+            domain="web",
+            token_count=900,
+            compacted_at="2026-04-08T03:00:00+00:00",
+        )
+
+        row = await store.get("web:test")
+        assert row["session_id"] == "post-compact-sid"   # rotated
+        assert row["token_count"] == 900                 # updated
+        assert row["domain"] == "web"
+        assert row["last_compacted_at"] == "2026-04-08T03:00:00+00:00"
+        # CRITICAL: last_active is UNCHANGED — preserves user-display semantics
+        assert row["last_active"] == original_last_active
+
+    @pytest.mark.asyncio
+    async def test_invariant_compacted_at_strictly_after_last_active(self, store):
+        """The re-compact-loop fix from d0b8642: is_compact_eligible() at
+        heartbeat.py:50 returns False when `session["last_active"] <= last_compacted`
+        (no new user activity since the compact). With UPDATE-based save, the
+        invariant holds STRICTLY (compacted_at > last_active) because:
+          - last_active is set by save() at time T1 (real user activity)
+          - compacted_at is captured at time T2 > T1 (compact happened later)
+          - The compact lock prevents user activity from racing the compact
+        """
+        # Save a row at the wall-clock "now"
+        await store.save("web:test", session_id="sid", domain="web", token_count=5000)
+
+        # Compact at a strictly later time (use a year-2099 timestamp to make
+        # the inequality unambiguous regardless of test machine clock skew)
+        compacted_at = "2099-12-31T23:59:59+00:00"
+        await store.save_with_compacted_at(
+            "web:test",
+            session_id="new-sid",
+            domain="web",
+            token_count=900,
+            compacted_at=compacted_at,
+        )
+
+        row = await store.get("web:test")
+        # Strict inequality: compaction happened AFTER the user's last activity
+        assert row["last_compacted_at"] > row["last_active"], (
+            f"compacted_at={row['last_compacted_at']!r} should be strictly > "
+            f"last_active={row['last_active']!r}"
+        )
+        # And the actual eligibility check from heartbeat.py:50 uses <=,
+        # which trivially holds when strict > does
+        assert row["last_active"] <= row["last_compacted_at"]
+
+    @pytest.mark.asyncio
+    async def test_replaces_session_id_atomically(self, store):
+        """The new method must atomically rotate BOTH session_id AND
+        last_compacted_at. A future refactor that splits them back into two
+        statements (the v1 race) would re-introduce the crash-recovery loop.
+        Asserts the post-state has both fields updated together.
+        """
+        await store.save("web:test", session_id="orig", domain="web", token_count=5000)
+        await store.save_with_compacted_at(
+            "web:test",
+            session_id="post-compact",
+            domain="web",
+            token_count=800,
+            compacted_at="2026-04-08T03:00:00+00:00",
+        )
+        row = await store.get("web:test")
+        assert row["session_id"] == "post-compact"
+        assert row["last_compacted_at"] == "2026-04-08T03:00:00+00:00"
+        assert row["token_count"] == 800
+        assert row["domain"] == "web"
+
+    @pytest.mark.asyncio
+    async def test_raises_keyerror_on_missing_key(self, store):
+        """UPDATE on a non-existent row matches zero rows. The method must
+        raise KeyError so the caller (nightly_compact) can log + skip when a
+        session was deleted between is_compact_eligible() and the post-compact
+        DB write (rare race with session.clear() or admin DELETE).
+        """
+        with pytest.raises(KeyError, match="web:nonexistent"):
+            await store.save_with_compacted_at(
+                "web:nonexistent",
+                session_id="sid",
+                domain="web",
+                token_count=100,
+                compacted_at="2026-04-08T03:00:00+00:00",
+            )
+
+
+class TestNightlyCompactKeyErrorHandling:
+    """Verifies nightly_compact catches the KeyError raised by
+    save_with_compacted_at and continues to the next eligible session
+    instead of crashing the entire loop. Pins the try/except wiring in
+    heartbeat.py so a future indentation slip can't silently break it.
+    """
+
+    @pytest_asyncio.fixture
+    async def store(self, tmp_path):
+        s = SessionStore(str(tmp_path / "test.db"))
+        await s.init()
+        yield s
+        await s.close()
+
+    @pytest.mark.asyncio
+    async def test_nightly_compact_skips_session_deleted_mid_compact(
+        self, store, tmp_path, monkeypatch
+    ):
+        """Two eligible sessions; the first one's save_with_compacted_at
+        raises KeyError (simulating deletion mid-compact). nightly_compact
+        must catch the error, log a warning, and continue to compact the
+        second session. The whole loop must NOT crash.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "1000"}'
+        )
+
+        # Seed two eligible sessions
+        await store.save("web:deleted", session_id="orig-deleted", domain="web", token_count=5000)
+        await store.save("web:survives", session_id="orig-survives", domain="web", token_count=5000)
+
+        # Wrap the real save_with_compacted_at — raise KeyError for the
+        # "deleted" key, fall through to the real impl for everything else
+        real_save = store.save_with_compacted_at
+        save_calls: list[str] = []
+
+        async def raising_save(key, **kwargs):
+            save_calls.append(key)
+            if key == "web:deleted":
+                raise KeyError(f"No session for key {key!r}")
+            return await real_save(key, **kwargs)
+
+        store.save_with_compacted_at = raising_save  # type: ignore[method-assign]
+
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+        # Two /compact calls (one per eligible session) + 1 consolidate = 3 runner.run calls
+        compact_a = MagicMock(error=None, session_id="new-a", output_tokens=900)
+        compact_b = MagicMock(error=None, session_id="new-b", output_tokens=850)
+        consolidate = MagicMock(error=None, session_id=None, output_tokens=10)
+        runner.run = AsyncMock(side_effect=[compact_a, compact_b, consolidate])
+
+        # MUST NOT raise — the KeyError on web:deleted must be caught + logged
+        await nightly_compact(runner, store, buffer=None)
+
+        # Both keys were attempted (proves the loop didn't bail early)
+        assert "web:deleted" in save_calls
+        assert "web:survives" in save_calls
+
+        # The surviving session was actually compacted
+        survives = await store.get("web:survives")
+        assert survives["session_id"] == "new-b" or survives["session_id"] == "new-a", (
+            "web:survives should have a rotated session_id (whichever order the loop ran)"
+        )
+        assert survives["last_compacted_at"] is not None
+
+        # All 3 runner.run calls happened: 2 /compact + 1 consolidate
+        assert runner.run.call_count == 3

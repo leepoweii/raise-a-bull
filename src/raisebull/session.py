@@ -106,6 +106,48 @@ class SessionStore:
             )
         await self._require_db().commit()
 
+    async def save_with_compacted_at(
+        self,
+        key: str,
+        *,
+        session_id: str,
+        domain: str,
+        token_count: int,
+        compacted_at: str,
+    ) -> None:
+        """Atomic post-compact UPDATE — rotates session_id, refreshes domain
+        and token_count, and stamps last_compacted_at in a single SQL
+        statement. PRESERVES last_active.
+
+        Used by nightly_compact() to record a successful compact without
+        losing the row's user-facing 'last real activity' timestamp.
+        last_active is displayed in discord_bot.py:434 ("Last active: ..."),
+        webhook_line.py:144, and used as `created_at` in
+        admin/routes_chat.py:154 — touching it during a background compact
+        would shift those displays to the cron's run time and confuse users.
+
+        Atomicity: a single UPDATE buffered in one transaction. A SIGTERM
+        between execute() and commit() leaves the WAL with an uncommitted
+        write that's discarded on reopen — so either the old row or the
+        new row is visible, never a partial state where session_id rotates
+        but last_compacted_at is NULL (the v1 race).
+
+        Raises KeyError if the row doesn't exist (deleted between
+        is_compact_eligible() and this call). nightly_compact catches this
+        and logs+skips to the next session.
+        """
+        cursor = await self._require_db().execute(
+            """
+            UPDATE sessions
+            SET session_id = ?, domain = ?, token_count = ?, last_compacted_at = ?
+            WHERE key = ?
+            """,
+            (session_id, domain, token_count, compacted_at, key),
+        )
+        await self._require_db().commit()
+        if cursor.rowcount == 0:
+            raise KeyError(f"No session for key {key!r}")
+
     async def clear(self, key: str) -> None:
         """Delete the session for *key* (no-op if not found)."""
         await self._require_db().execute("DELETE FROM sessions WHERE key = ?", (key,))

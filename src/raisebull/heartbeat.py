@@ -215,16 +215,29 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
                 logger.error("Compact failed for %s: %s", key, result.error)
                 continue
 
-            # Step 3: update DB — save new session_id, then stamp last_compacted_at >= last_active
+            # Step 3: atomic UPDATE of new session_id + last_compacted_at via a
+            # single SQL statement. last_active is PRESERVED — it's the user-
+            # facing "last real activity" timestamp shown in discord/line/web
+            # displays and must not jump to the compact time. KeyError fires
+            # if the row was deleted between is_compact_eligible() and now
+            # (rare race with session.clear()) — log + skip to next session.
             new_session_id = result.session_id or session_id
-            await sessions.save(
-                key, session_id=new_session_id, domain=s["domain"],
-                token_count=result.output_tokens or s["token_count"],
-            )
-            # Capture timestamp AFTER save() so last_compacted_at >= last_active,
-            # preventing is_compact_eligible() from treating the compact itself as new activity.
             now = datetime.now(timezone.utc).isoformat()
-            await sessions.update_compacted_at(key, now)
+            try:
+                await sessions.save_with_compacted_at(
+                    key,
+                    session_id=new_session_id,
+                    domain=s["domain"],
+                    token_count=result.output_tokens or s["token_count"],
+                    compacted_at=now,
+                )
+            except KeyError:
+                logger.warning(
+                    "Nightly compact: %s deleted between eligibility check and "
+                    "compact-stamp write — skipping",
+                    key,
+                )
+                continue
 
         # Step 4: consolidate — one LLM call to update memory
         summary_parts = [f"Session {s['key']}: {s['token_count']} tokens" for s in eligible]
