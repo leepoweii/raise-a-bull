@@ -14,6 +14,19 @@
 
 ## Changelog
 
+**v3 (2026-04-08, post-merge cleanup):** Final-state review by Opus + Sonnet caught real issues that the per-task spec/quality reviews missed because they only saw individual commits in isolation. All fixes shipped to main as separate commits AFTER the feature branch merged:
+
+- 🔴 **`af1e70d` Settings UI gap (Phase 4 catch).** Plan + Task 4 spec assumed the dashboard auto-rendered all `_ALLOWED_KEYS`. False — `settings.html` is hand-coded and only had 6 of 10 form fields. Phase 4 static inspection caught this. Fix: added 4 missing form-group blocks + 4 entries in `settings.js` initial state + 20 parametrized guard tests in new `tests/unit/test_settings_form.py` that prevent future drift in either direction.
+- 🔴 **`ba72e0d` `/internal/discord/push` security hole (Phase 5 catch).** Phase 3 curl agent only verified the two trigger endpoints. Manual curl from outside confirmed live exploit: external POST sent arbitrary Discord messages with 200. Task 5 hardened the two triggers but missed `discord_push`. Fix: same `_require_localhost` gate + 2 new tests.
+- 🟡 **`a234cbe` canonical error message.** `routes_settings.py` returned two different bodies (`"must be a positive integer"` vs `"must be > 0"`) for the same constraint. Phase 5 flagged divergence risk. Fix: single canonical message + new test parametrizing 8 bad inputs.
+- 🟡 **`29460ea` log contract caplog test.** Phase 3 Check L was PARTIAL — no automated assertion that `nightly_compact()` actually emits the threshold value in its logs. Fix: 2 caplog tests pinning the format strings.
+- 🟡 **`217a02d` + `bdd14b3` e2e Settings tests.** Existing Playwright Settings test only checked AGENT NAME visible — would have passed with 9 of 10 fields missing. Fix: `renders every _ALLOWED_KEYS field` (count===10) + `nightly_compact_threshold round-trips through save button`. Plus a follow-up `bdd14b3` fixing a cleanup race that codex caught (waiting on `.restart-notice` visibility doesn't prove the second PUT finished — replaced with `waitForResponse` + reload verify).
+- 🟡 **`27ecb1d` e2e validation toast test.** Pins the chain: invalid PUT → 400 → app.js api() helper → `showToast(error, 'error')` → `.toast` element visible with canonical message + `.restart-notice` stays hidden + reload drops local Alpine garbage.
+
+**v3 cleanup (still pending after Phase 5 final review by Opus + Sonnet):**
+- e2e test bug (Opus catch): `dashboard.spec.ts:173` did `fill('abc')` on `<input type="number">` which Playwright rejects. The pre-push hook only runs pytest, so the test had never actually run. Fixed by changing the bad value to `-100` (a valid number string that still fails the PUT validator). Verified with `npx playwright test` against a live uvicorn — 4/4 Settings tests now pass.
+- Doc drift: CLAUDE.md test counts were stale (`~229/17/16` → actual `293/16/19`), localhost gate bullet listed only 2 of 3 gated endpoints. Both fixed.
+
 **v2 (2026-04-07, post-review):** Patches applied after Opus + Sonnet + Haiku review:
 - 🔴 **Task 3 lock** — Added module-level `asyncio.Lock` so cron + manual trigger can't race. APScheduler `max_instances=1` only protects the same job_id; manual trigger via `asyncio.create_task()` bypasses it entirely. Without the lock, two concurrent `nightly_compact()` runs would double-call `/compact` on the same session_id and race `update_compacted_at()`. Split Task 3 into two commits (threshold + lock) to keep diffs focused.
 - 🔴 **Task 4 PUT validation** — Reject `nightly_compact_threshold` PUT with non-positive int (400). Without this, `_read_settings()` (no validation) and `_read_threshold()` (validates) diverge: dashboard shows `"abc"` but `nightly_compact()` silently uses 50000.

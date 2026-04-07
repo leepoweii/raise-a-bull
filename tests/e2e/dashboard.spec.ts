@@ -158,10 +158,15 @@ test.describe('Settings Page', () => {
   test('invalid threshold surfaces error toast', async ({ page }) => {
     // Pin the contract: the generic app.js api() helper routes any response
     // body with an `error` key to showToast(..., 'error'). The routes_settings.py
-    // 400 validator returns the canonical message. End-to-end: typing garbage
-    // into the threshold input and clicking Save must display that message in
-    // the toast — otherwise the user sees the Save button flash and has no
-    // idea why nothing happened.
+    // 400 validator returns the canonical message for ANY non-positive int
+    // (non-numeric, zero, negative, empty, whitespace). End-to-end: setting an
+    // invalid value and clicking Save must display that message in the toast.
+    //
+    // Why -100 instead of "abc": settings.html uses <input type="number"> which
+    // both Playwright's fill() and the browser refuse to accept non-numeric
+    // strings. -100 is a valid number string (passes fill() and the input) but
+    // is rejected by the PUT validator (n <= 0), exercising the same canonical
+    // error path as any other invalid value.
     //
     // Previously settings.js:47 only handled result.ok (and ignored the null
     // return from api() on 400), but app.js's api() helper already centralizes
@@ -170,7 +175,7 @@ test.describe('Settings Page', () => {
     await page.click('a:has-text("Settings")');
     const input = page.locator('[x-model="settings.nightly_compact_threshold"]');
     await expect(input).toBeVisible();
-    await input.fill('abc');
+    await input.fill('-100');
     await page.click('button:has-text("Save")');
     // Toast element uses .toast class and is populated by app.js showToast().
     // Must contain the canonical error message from routes_settings.py.
@@ -181,15 +186,13 @@ test.describe('Settings Page', () => {
     // Critically: .restart-notice must NOT appear — Alpine's saved=true only
     // fires on a successful PUT, and a 400 should keep it false.
     await expect(page.locator('.restart-notice')).not.toBeVisible();
-    // Clean up: restore a valid value via direct API so the sentinel "abc"
-    // never gets anywhere near settings.json (api() returned null, so the
-    // local Alpine state still shows "abc" but the file on disk is unchanged;
-    // reload to drop the local garbage)
+    // Clean up: api() returned null, so local Alpine state still shows "-100"
+    // but the file on disk is unchanged. Reload drops the local garbage.
     await page.reload();
     await page.click('a:has-text("Settings")');
     await expect(
       page.locator('[x-model="settings.nightly_compact_threshold"]')
-    ).not.toHaveValue('abc');
+    ).not.toHaveValue('-100');
   });
 });
 

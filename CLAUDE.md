@@ -152,16 +152,16 @@ npx playwright test
 
 ```
 tests/
-├── unit/           — 11 files (trace, heartbeat, stream_buffer, three_tier,
+├── unit/           — 12 files (trace, heartbeat, stream_buffer, three_tier,
 │                     parsers_text, parsers_document, invoice, attachment_router,
-│                     buffer, line_mention, nightly_compact)
+│                     buffer, line_mention, nightly_compact, settings_form)
 ├── integration/    — 7 files (admin, chat, status, attachments, buffer_flow,
 │                     history, line_webhook)
-├── smoke/          — 3 files (LLM basic + MCP search + attachment + buffer prompt
-│                     + nightly_compact_live)
-├── e2e/            — Playwright (16 tests: auth, nav, status, settings, chat, file upload)
+├── smoke/          — 3 files (test_smoke + heartbeat_live + nightly_compact_live)
+├── e2e/            — Playwright (19 tests: auth, nav, status, settings, chat,
+│                     file upload, +3 new Settings drift/round-trip/toast)
 └── root            — 5 files (runner, session, discord_bot, main, recovery)
-Total: ~229 fast + 17 smoke + 16 e2e
+Total: 293 fast + 16 smoke + 19 e2e
 ```
 
 ---
@@ -185,7 +185,7 @@ Total: ~229 fast + 17 smoke + 16 e2e
 - **Nightly compact** — Scheduled job compacts sessions over the configured token threshold (default 50000) with new activity since the last compact, then runs a single consolidate prompt to update memory files. Skips `heartbeat:*` sessions
 - **Nightly compact threshold runtime-configurable** — `nightly_compact_threshold` in `settings.json` (highest priority) or `NIGHTLY_COMPACT_THRESHOLD` env (middle) or hardcoded 50000 default. Each cron tick + each manual trigger re-reads via `_read_threshold()` so dashboard edits take effect without restart. Invalid (zero/negative/non-numeric) values are rejected at PUT-time by the dashboard with HTTP 400, eliminating dashboard ↔ runtime divergence
 - **Nightly compact serialized** — Module-level `asyncio.Lock` (`_nightly_lock` in `heartbeat.py`) prevents cron + manual trigger from running `nightly_compact()` concurrently. APScheduler `max_instances=1` only protects the same job_id, not the manual `asyncio.create_task()` path from `/internal/nightly-compact/trigger`
-- **Internal trigger endpoints localhost-only** — `/internal/heartbeat/trigger` and `/internal/nightly-compact/trigger` reject non-`127.0.0.1`/`::1` callers with 403 via `_require_localhost()`. ASGITransport callers (in tests) leave `request.client` as `None` and are treated as localhost. Future dashboard "Run now" buttons must NOT extend the IP allowlist — instead, add a new `/admin/api/*` route that goes through the existing cookie `auth_middleware` and then calls `nightly_compact()` directly
+- **Internal endpoints localhost-only** — `/internal/heartbeat/trigger`, `/internal/nightly-compact/trigger`, AND `/internal/discord/push` all reject non-`127.0.0.1`/`::1` callers with 403 via `_require_localhost()`. ASGITransport callers (in tests) leave `request.client` as `None` and are treated as localhost. Future dashboard "Run now" buttons must NOT extend the IP allowlist — instead, add a new `/admin/api/*` route that goes through the existing cookie `auth_middleware` and calls the target function directly. **Known gap:** `routes_settings.py` PUT validation only covers `nightly_compact_threshold`; the other 6 numeric settings (`max_steps`, `auto_reply_timeout`, `session_idle_timeout`, `heartbeat_interval`, `buffer_time`, `nightly_compact_hour`) accept any string and are not server-side validated
 
 ---
 
