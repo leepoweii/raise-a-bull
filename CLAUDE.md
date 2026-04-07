@@ -157,10 +157,11 @@ tests/
 │                     buffer, line_mention, nightly_compact)
 ├── integration/    — 7 files (admin, chat, status, attachments, buffer_flow,
 │                     history, line_webhook)
-├── smoke/          — 2 files (LLM basic + MCP search + attachment + buffer prompt)
+├── smoke/          — 3 files (LLM basic + MCP search + attachment + buffer prompt
+│                     + nightly_compact_live)
 ├── e2e/            — Playwright (16 tests: auth, nav, status, settings, chat, file upload)
 └── root            — 5 files (runner, session, discord_bot, main, recovery)
-Total: ~204 fast + 16 smoke + 16 e2e
+Total: ~229 fast + 17 smoke + 16 e2e
 ```
 
 ---
@@ -181,7 +182,10 @@ Total: ~204 fast + 16 smoke + 16 e2e
 - **Per-channel lock** — `asyncio.Lock` per channel serializes LLM calls, preventing race conditions
 - **Session history** — Dashboard reads Claude Code `.jsonl` files to display full conversation history
 - **Heartbeat fresh start** — Each tick uses `session_id=None` to prevent token accumulation
-- **Nightly compact** — Scheduled job compacts sessions >50K tokens with new activity, consolidates learnings into memory files
+- **Nightly compact** — Scheduled job compacts sessions over the configured token threshold (default 50000) with new activity since the last compact, then runs a single consolidate prompt to update memory files. Skips `heartbeat:*` sessions
+- **Nightly compact threshold runtime-configurable** — `nightly_compact_threshold` in `settings.json` (highest priority) or `NIGHTLY_COMPACT_THRESHOLD` env (middle) or hardcoded 50000 default. Each cron tick + each manual trigger re-reads via `_read_threshold()` so dashboard edits take effect without restart. Invalid (zero/negative/non-numeric) values are rejected at PUT-time by the dashboard with HTTP 400, eliminating dashboard ↔ runtime divergence
+- **Nightly compact serialized** — Module-level `asyncio.Lock` (`_nightly_lock` in `heartbeat.py`) prevents cron + manual trigger from running `nightly_compact()` concurrently. APScheduler `max_instances=1` only protects the same job_id, not the manual `asyncio.create_task()` path from `/internal/nightly-compact/trigger`
+- **Internal trigger endpoints localhost-only** — `/internal/heartbeat/trigger` and `/internal/nightly-compact/trigger` reject non-`127.0.0.1`/`::1` callers with 403 via `_require_localhost()`. ASGITransport callers (in tests) leave `request.client` as `None` and are treated as localhost. Future dashboard "Run now" buttons must NOT extend the IP allowlist — instead, add a new `/admin/api/*` route that goes through the existing cookie `auth_middleware` and then calls `nightly_compact()` directly
 
 ---
 
@@ -199,6 +203,7 @@ Total: ~204 fast + 16 smoke + 16 e2e
 | `DISCORD_BOT_TOKEN` | optional | Skip if LINE only |
 | `MINIMAX_API_KEY` | optional | MiniMax M2.7 instead of Claude |
 | `CLAUDE_MODEL` | optional | Default: `claude-sonnet-4-6` |
+| `NIGHTLY_COMPACT_THRESHOLD` | optional | Token threshold for nightly compact (default `50000`). Overridden by `nightly_compact_threshold` in `settings.json` if present |
 | `SERPER_API_KEY` | optional | Enables MCP search (free: serper.dev/signup) |
 | `JINA_API_KEY` | optional | Enables MCP browse (free: jina.ai) |
 | `GEMINI_API_KEY` | optional | Enables image vision (free: aistudio.google.com/apikey) |

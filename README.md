@@ -171,6 +171,7 @@ Access at `http://localhost:{BOT_PORT}/admin/` (password set via `ADMIN_PASSWORD
 | `DISCORD_GUILD_ID` | optional | Your Discord server ID |
 | `MINIMAX_API_KEY` | optional | Use MiniMax instead of Claude subscription |
 | `CLAUDE_MODEL` | optional | Model name (default: `claude-sonnet-4-6`) |
+| `NIGHTLY_COMPACT_THRESHOLD` | optional | Token threshold for nightly compact (default `50000`). Editable from the dashboard Settings page without restart |
 | `SERPER_API_KEY` | optional | Enables MCP web search |
 | `JINA_API_KEY` | optional | Enables MCP page reading |
 | `GEMINI_API_KEY` | optional | Enables image vision (Gemini Flash) |
