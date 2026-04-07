@@ -210,6 +210,37 @@ class TestReadThreshold:
         from raisebull.heartbeat import _read_threshold
         assert _read_threshold(str(nonexistent)) == 50000
 
+    def test_whitespace_around_value_is_stripped(self, tmp_path, monkeypatch):
+        """`_coerce_threshold("  42  ")` (leading/trailing whitespace) → 42.
+        Pins the .strip() behavior so a future refactor that drops it would
+        silently start rejecting otherwise-valid env values."""
+        import json
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": "  42  "})
+        )
+        from raisebull.heartbeat import _read_threshold
+        assert _read_threshold(str(tmp_path)) == 42
+
+    def test_nested_object_value_falls_through(self, tmp_path, monkeypatch):
+        """`_coerce_threshold({"value": 42})` → None (falls through). Pins the
+        defensive behavior when settings.json is malformed (e.g., a user
+        accidentally writes `{"nightly_compact_threshold": {"value": 42}}`
+        instead of `{"nightly_compact_threshold": 42}`). The function must
+        NOT crash and must NOT treat the dict as valid."""
+        import json
+        monkeypatch.setenv("NIGHTLY_COMPACT_THRESHOLD", "8888")
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "settings.json").write_text(
+            json.dumps({"nightly_compact_threshold": {"value": 42}})
+        )
+        from raisebull.heartbeat import _read_threshold
+        # Settings.json value is invalid → falls through to env (8888)
+        assert _read_threshold(str(tmp_path)) == 8888
+
 
 class TestNightlyCompactThreshold:
     @pytest_asyncio.fixture
@@ -319,6 +350,56 @@ class TestNightlyCompactThreshold:
         # Sanity: the session was actually compacted exactly once
         row = await store.get("web:hot")
         assert row["session_id"] == "new-sid"
+        assert row["last_compacted_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_compact_with_none_output_tokens_preserves_token_count(
+        self, store, tmp_path, monkeypatch
+    ):
+        """If runner.run('/compact') returns result.output_tokens = None (which
+        the runner can do if Claude doesn't report token usage), nightly_compact
+        must NOT overwrite the row's token_count with None — it must fall back
+        to the original token_count. Pins the `result.output_tokens or s["token_count"]`
+        fallback behavior in heartbeat.py.
+
+        IMPORTANT: the test MUST write a settings.json with a low threshold
+        (1000) so the 5000-token seeded session IS eligible. Without this, the
+        default 50000 threshold would skip the session entirely — runner.run
+        would never be called, and the test would falsely "pass" by never
+        exercising the fallback path at all.
+        """
+        from unittest.mock import AsyncMock, MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        # Low threshold so the 5000-token session qualifies
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "1000"}'
+        )
+
+        await store.save("web:hot", session_id="orig", domain="web", token_count=5000)
+
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+        # /compact returns success but with output_tokens=None
+        compact_result = MagicMock(error=None, session_id="new-sid", output_tokens=None)
+        consolidate_result = MagicMock(error=None, session_id=None, output_tokens=None)
+        runner.run = AsyncMock(side_effect=[compact_result, consolidate_result])
+
+        await nightly_compact(runner, store, buffer=None)
+
+        # Sanity: runner.run was actually called — proves the session WAS eligible
+        # and the code reached the fallback path (not skipped by is_compact_eligible)
+        assert runner.run.call_count == 2  # 1 /compact + 1 consolidate
+
+        row = await store.get("web:hot")
+        assert row["session_id"] == "new-sid"  # session was compacted
+        # token_count must be the original 5000, NOT None — the fallback path
+        # `result.output_tokens or s["token_count"]` evaluates to s["token_count"]
+        # because None is falsy.
+        assert row["token_count"] == 5000
         assert row["last_compacted_at"] is not None
 
 
