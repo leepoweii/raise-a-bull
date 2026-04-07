@@ -85,6 +85,63 @@ test.describe('Settings Page', () => {
     const nameInput = page.locator('input').first();
     await expect(nameInput).toHaveValue('Agent');
   });
+
+  test('renders every _ALLOWED_KEYS field', async ({ page }) => {
+    // Regression guard — commits up through af1e70d left 4 of 10 _ALLOWED_KEYS
+    // entries API-editable but UI-invisible. This test asserts every key has a
+    // matching x-model binding on the rendered page. If someone adds a new key
+    // to _ALLOWED_KEYS without a form-group block, this test fails immediately.
+    //
+    // Keep in sync with _ALLOWED_KEYS in src/raisebull/admin/routes_settings.py
+    // (the unit test tests/unit/test_settings_form.py enforces the structural
+    // match server-side; this e2e adds the rendered-DOM check).
+    await page.click('a:has-text("Settings")');
+    const expectedKeys = [
+      'agent_name',
+      'model',
+      'max_steps',
+      'auto_reply_timeout',
+      'session_idle_timeout',
+      'heartbeat_interval',
+      'buffer_time',
+      'nightly_compact_hour',
+      'nightly_compact_threshold',
+      'line_trigger_prefix',
+    ];
+    for (const key of expectedKeys) {
+      const field = page.locator(`[x-model="settings.${key}"]`);
+      await expect(field, `missing form field for settings.${key}`).toBeVisible();
+    }
+    // Exactly 10 form fields — not 6, not 11 — so we notice drift in either direction.
+    const allBindings = await page.locator('[x-model^="settings."]').count();
+    expect(allBindings).toBe(expectedKeys.length);
+  });
+
+  test('nightly_compact_threshold round-trips through save button', async ({ page }) => {
+    // End-to-end proof that the UI can edit the new field, save it via the
+    // actual button click, and the value persists across a page reload.
+    // Would have caught the af1e70d bug (hand-coded form missing the field)
+    // and any future regression that drops the input from the rendered HTML.
+    await page.click('a:has-text("Settings")');
+    const input = page.locator('[x-model="settings.nightly_compact_threshold"]');
+    await expect(input).toBeVisible();
+    // Pick a distinctive sentinel value unlikely to collide with a real config
+    await input.fill('31337');
+    await page.click('button:has-text("Save")');
+    // Alpine's save() awaits the PUT then sets saved=true — wait for the
+    // restart-notice to appear as the confirmation signal
+    await expect(page.locator('.restart-notice')).toBeVisible({ timeout: 5000 });
+    // Reload and re-navigate — value must still be 31337
+    await page.reload();
+    await page.click('a:has-text("Settings")');
+    const reloadedInput = page.locator('[x-model="settings.nightly_compact_threshold"]');
+    await expect(reloadedInput).toHaveValue('31337');
+    // Clean up: restore a sensible default so subsequent tests / live usage don't
+    // inherit the sentinel
+    await reloadedInput.fill('50000');
+    await page.click('button:has-text("Save")');
+    await expect(page.locator('.restart-notice')).toBeVisible({ timeout: 5000 });
+  });
 });
 
 test.describe('Web Chat', () => {
