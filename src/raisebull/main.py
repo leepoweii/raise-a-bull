@@ -29,7 +29,7 @@ from raisebull.buffer import MessageBuffer
 from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
 from raisebull.discord_bot import run_discord_bot, get_bot
-from raisebull.heartbeat import start_heartbeat, run_event_check
+from raisebull.heartbeat import start_heartbeat, run_event_check, nightly_compact
 from raisebull.webhook_line import handle_line_message, handle_line_attachment
 from raisebull.admin import create_admin_app
 
@@ -206,8 +206,41 @@ async def webhook_line(request: Request) -> Response:
     return Response(content="OK", status_code=200)
 
 
+def _require_localhost(request: Request) -> None:
+    """Reject non-localhost callers with 403.
+
+    Used by /internal/* endpoints that should only be invoked by:
+      - The same Python process (e.g., heartbeat scheduler firing a task)
+      - A shell inside the same container (`docker exec ... curl 127.0.0.1:8000/...`)
+      - Test code via ASGITransport (request.client is None — treated as localhost)
+
+    Tailnet IPs, the Docker bridge gateway IP, and any forwarded request from
+    the published port are all rejected on purpose. If a future feature needs to
+    expose nightly_compact via a dashboard "Run now" button, it must NOT bypass
+    this gate by adding more allowed IPs — instead, add a NEW dashboard route
+    (e.g., POST /admin/api/nightly-compact/run) that goes through the existing
+    cookie-based auth_middleware and then calls nightly_compact() directly.
+    The /internal/* path is reserved for in-process / in-container callers.
+    """
+    client = request.client
+    if client is None:
+        return
+    if client.host in ("127.0.0.1", "::1", "localhost"):
+        return
+    raise HTTPException(status_code=403, detail="localhost only")
+
+
 @app.post("/internal/heartbeat/trigger")
-async def heartbeat_trigger() -> dict[str, Any]:
+async def heartbeat_trigger(request: Request) -> dict[str, Any]:
     """Manually trigger one heartbeat tick (for testing). Localhost only."""
+    _require_localhost(request)
     asyncio.create_task(run_event_check(_runner, _sessions, push_fn=_heartbeat_push))
     return {"ok": True, "message": "heartbeat tick started"}
+
+
+@app.post("/internal/nightly-compact/trigger")
+async def nightly_compact_trigger(request: Request) -> dict[str, Any]:
+    """Manually trigger nightly compact (for testing). Localhost only."""
+    _require_localhost(request)
+    asyncio.create_task(nightly_compact(_runner, _sessions, buffer=_message_buffer))
+    return {"ok": True, "message": "nightly compact started"}

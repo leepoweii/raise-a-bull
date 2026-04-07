@@ -82,6 +82,55 @@ async def test_heartbeat_trigger_returns_ok():
 
 
 @pytest.mark.asyncio
+async def test_heartbeat_trigger_blocks_remote_client():
+    """Non-localhost callers must get 403."""
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.run_event_check", new_callable=AsyncMock):
+            from raisebull.main import app
+            transport = ASGITransport(app=app, client=("203.0.113.5", 12345))
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/internal/heartbeat/trigger")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_nightly_compact_trigger_returns_ok():
+    """Localhost caller (None client from ASGITransport default) gets 200."""
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.nightly_compact", new_callable=AsyncMock):
+            from raisebull.main import app
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post("/internal/nightly-compact/trigger")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_nightly_compact_trigger_blocks_remote_client():
+    """Non-localhost callers must get 403."""
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.nightly_compact", new_callable=AsyncMock):
+            from raisebull.main import app
+            transport = ASGITransport(app=app, client=("203.0.113.5", 12345))
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/internal/nightly-compact/trigger")
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_nightly_compact_trigger_allows_ipv6_localhost():
+    """::1 must be treated as localhost."""
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.nightly_compact", new_callable=AsyncMock):
+            from raisebull.main import app
+            transport = ASGITransport(app=app, client=("::1", 12345))
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post("/internal/nightly-compact/trigger")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_webhook_line_missing_signature_returns_400():
     with patch.dict("os.environ", ENV):
         from raisebull.main import app
