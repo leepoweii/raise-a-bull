@@ -266,6 +266,9 @@ class TestSettings:
             json={"nightly_compact_threshold": "abc"},
         )
         assert resp.status_code == 400
+        assert resp.json() == {
+            "error": "nightly_compact_threshold must be a positive integer"
+        }
         # Confirm the bad value was NOT persisted
         resp = await client.get("/admin/api/settings")
         data = resp.json()
@@ -279,6 +282,9 @@ class TestSettings:
             json={"nightly_compact_threshold": "0"},
         )
         assert resp.status_code == 400
+        assert resp.json() == {
+            "error": "nightly_compact_threshold must be a positive integer"
+        }
 
     @pytest.mark.asyncio
     async def test_put_settings_nightly_compact_threshold_rejects_negative(self, client):
@@ -288,6 +294,27 @@ class TestSettings:
             json={"nightly_compact_threshold": "-100"},
         )
         assert resp.status_code == 400
+        assert resp.json() == {
+            "error": "nightly_compact_threshold must be a positive integer"
+        }
+
+    @pytest.mark.asyncio
+    async def test_put_settings_threshold_error_message_is_canonical(self, client):
+        """All rejection cases (non-numeric, zero, negative, empty, None, whitespace)
+        MUST return the exact same error body. This prevents the client from having
+        to branch on parse-failure vs out-of-range vs whitespace. Locks down the
+        contract so a future cleanup can't silently diverge the messages again."""
+        await _login(client)
+        canonical = {"error": "nightly_compact_threshold must be a positive integer"}
+        for bad_value in ["abc", "0", "-100", "", "  ", None, "3.7", "1e5"]:
+            resp = await client.put(
+                "/admin/api/settings",
+                json={"nightly_compact_threshold": bad_value},
+            )
+            assert resp.status_code == 400, f"value {bad_value!r} should have been rejected"
+            assert resp.json() == canonical, (
+                f"value {bad_value!r} produced {resp.json()!r}, expected canonical message"
+            )
 
 
 class TestPermissions:

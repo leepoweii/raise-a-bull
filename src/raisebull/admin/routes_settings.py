@@ -63,18 +63,18 @@ async def put_settings(request: Request):
     # Validate strict-positive int keys before persisting. Without this, garbage
     # values would be displayed by GET but silently ignored by nightly_compact()
     # (which validates internally and falls back to default), causing dashboard
-    # vs runtime divergence.
+    # vs runtime divergence. Single canonical error message so clients can match
+    # on one string instead of branching on parse-failure vs out-of-range.
     if "nightly_compact_threshold" in body:
+        raw = body["nightly_compact_threshold"]
         try:
-            n = int(str(body["nightly_compact_threshold"]).strip())
+            n = int(str(raw).strip())
+            valid = n > 0
         except (ValueError, TypeError, AttributeError):
+            valid = False
+        if not valid:
             return JSONResponse(
                 {"error": "nightly_compact_threshold must be a positive integer"},
-                status_code=400,
-            )
-        if n <= 0:
-            return JSONResponse(
-                {"error": "nightly_compact_threshold must be > 0"},
                 status_code=400,
             )
 
