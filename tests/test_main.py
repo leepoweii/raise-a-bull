@@ -71,6 +71,51 @@ async def test_discord_push_success():
 
 
 @pytest.mark.asyncio
+async def test_discord_push_blocks_remote_client():
+    """Non-localhost callers must get 403. Regression guard — Phase 3 verified the
+    live bull-daniu deploy was exploitable: external curl to /internal/discord/push
+    accepted arbitrary Discord messages with 200. The two trigger endpoints got the
+    localhost gate in Task 5 but discord_push was overlooked."""
+    mock_channel = MagicMock()
+    mock_channel.send = AsyncMock()
+    mock_bot = MagicMock()
+    mock_bot.get_channel.return_value = mock_channel
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.get_bot", return_value=mock_bot):
+            from raisebull.main import app
+            transport = ASGITransport(app=app, client=("203.0.113.5", 12345))
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/internal/discord/push",
+                    json={"channel_id": "123", "message": "hi"},
+                )
+    assert resp.status_code == 403
+    # Critically: channel.send MUST NOT have been called — the gate must stop
+    # the request before any Discord API work happens.
+    mock_channel.send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_discord_push_allows_ipv6_localhost():
+    """::1 must be treated as localhost (same allowlist as the trigger endpoints)."""
+    mock_channel = MagicMock()
+    mock_channel.send = AsyncMock()
+    mock_bot = MagicMock()
+    mock_bot.get_channel.return_value = mock_channel
+    with patch.dict("os.environ", ENV):
+        with patch("raisebull.main.get_bot", return_value=mock_bot):
+            from raisebull.main import app
+            transport = ASGITransport(app=app, client=("::1", 12345))
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/internal/discord/push",
+                    json={"channel_id": "123", "message": "hi"},
+                )
+    assert resp.status_code == 200
+    mock_channel.send.assert_called_once_with("hi")
+
+
+@pytest.mark.asyncio
 async def test_heartbeat_trigger_returns_ok():
     with patch.dict("os.environ", ENV):
         with patch("raisebull.main.run_event_check", new_callable=AsyncMock):

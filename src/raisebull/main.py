@@ -141,7 +141,7 @@ async def health() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Internal API — Discord push (localhost only; called by heartbeat/scripts)
+# Internal API — localhost-only endpoints
 # ---------------------------------------------------------------------------
 
 from pydantic import BaseModel as _BaseModel
@@ -152,9 +152,34 @@ class DiscordPushRequest(_BaseModel):
     message: str
 
 
+def _require_localhost(request: Request) -> None:
+    """Reject non-localhost callers with 403.
+
+    Used by /internal/* endpoints that should only be invoked by:
+      - The same Python process (e.g., heartbeat scheduler firing a task)
+      - A shell inside the same container (`docker exec ... curl 127.0.0.1:8000/...`)
+      - Test code via ASGITransport (request.client is None — treated as localhost)
+
+    Tailnet IPs, the Docker bridge gateway IP, and any forwarded request from
+    the published port are all rejected on purpose. If a future feature needs to
+    expose nightly_compact via a dashboard "Run now" button, it must NOT bypass
+    this gate by adding more allowed IPs — instead, add a NEW dashboard route
+    (e.g., POST /admin/api/nightly-compact/run) that goes through the existing
+    cookie-based auth_middleware and then calls nightly_compact() directly.
+    The /internal/* path is reserved for in-process / in-container callers.
+    """
+    client = request.client
+    if client is None:
+        return
+    if client.host in ("127.0.0.1", "::1", "localhost"):
+        return
+    raise HTTPException(status_code=403, detail="localhost only")
+
+
 @app.post("/internal/discord/push")
-async def discord_push(req: DiscordPushRequest) -> dict[str, Any]:
-    """Push a message to a Discord channel via the running bot."""
+async def discord_push(req: DiscordPushRequest, request: Request) -> dict[str, Any]:
+    """Push a message to a Discord channel via the running bot. Localhost only."""
+    _require_localhost(request)
     bot = get_bot()
     if bot is None:
         raise HTTPException(status_code=503, detail="Discord bot not running")
@@ -204,30 +229,6 @@ async def webhook_line(request: Request) -> Response:
 
     asyncio.create_task(_process())
     return Response(content="OK", status_code=200)
-
-
-def _require_localhost(request: Request) -> None:
-    """Reject non-localhost callers with 403.
-
-    Used by /internal/* endpoints that should only be invoked by:
-      - The same Python process (e.g., heartbeat scheduler firing a task)
-      - A shell inside the same container (`docker exec ... curl 127.0.0.1:8000/...`)
-      - Test code via ASGITransport (request.client is None — treated as localhost)
-
-    Tailnet IPs, the Docker bridge gateway IP, and any forwarded request from
-    the published port are all rejected on purpose. If a future feature needs to
-    expose nightly_compact via a dashboard "Run now" button, it must NOT bypass
-    this gate by adding more allowed IPs — instead, add a NEW dashboard route
-    (e.g., POST /admin/api/nightly-compact/run) that goes through the existing
-    cookie-based auth_middleware and then calls nightly_compact() directly.
-    The /internal/* path is reserved for in-process / in-container callers.
-    """
-    client = request.client
-    if client is None:
-        return
-    if client.host in ("127.0.0.1", "::1", "localhost"):
-        return
-    raise HTTPException(status_code=403, detail="localhost only")
 
 
 @app.post("/internal/heartbeat/trigger")
