@@ -27,11 +27,15 @@ MAX_DAILY_TRIGGERS = int(os.environ.get("MAX_DAILY_HEARTBEAT_TRIGGERS", "20"))
 COMPACT_TOKEN_THRESHOLD = 50_000
 
 
-def is_compact_eligible(session: dict, key: str = "") -> bool:
+def is_compact_eligible(
+    session: dict,
+    key: str = "",
+    threshold: int = COMPACT_TOKEN_THRESHOLD,
+) -> bool:
     """Check if a session should be compacted in the nightly job."""
     if key.startswith("heartbeat:"):
         return False
-    if session["token_count"] <= COMPACT_TOKEN_THRESHOLD:
+    if session["token_count"] <= threshold:
         return False
     last_compacted = session.get("last_compacted_at")
     if last_compacted and session["last_active"] <= last_compacted:

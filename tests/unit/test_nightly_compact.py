@@ -38,6 +38,30 @@ class TestCompactEligibility:
         session = {"token_count": 50000, "last_compacted_at": None, "last_active": "2026-04-07T10:00:00"}
         assert is_compact_eligible(session) is False  # must be > 50K, not >=
 
+    def test_eligible_with_custom_threshold_below_token_count(self):
+        session = {
+            "token_count": 3000,
+            "last_compacted_at": None,
+            "last_active": "2026-04-07T10:00:00",
+        }
+        assert is_compact_eligible(session, threshold=2000) is True
+
+    def test_not_eligible_with_custom_threshold_above_token_count(self):
+        session = {
+            "token_count": 1500,
+            "last_compacted_at": None,
+            "last_active": "2026-04-07T10:00:00",
+        }
+        assert is_compact_eligible(session, threshold=2000) is False
+
+    def test_custom_threshold_uses_strict_greater_than(self):
+        session = {
+            "token_count": 2000,
+            "last_compacted_at": None,
+            "last_active": "2026-04-07T10:00:00",
+        }
+        assert is_compact_eligible(session, threshold=2000) is False
+
 
 class TestSessionStoreListAll:
     @pytest_asyncio.fixture
