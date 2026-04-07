@@ -11,6 +11,7 @@ Routes:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -158,7 +159,8 @@ def _require_localhost(request: Request) -> None:
     Used by /internal/* endpoints that should only be invoked by:
       - The same Python process (e.g., heartbeat scheduler firing a task)
       - A shell inside the same container (`docker exec ... curl 127.0.0.1:8000/...`)
-      - Test code via ASGITransport (request.client is None — treated as localhost)
+      - Test code via ASGITransport (client defaults to ("127.0.0.1", 123) in
+        httpx 0.28+ so the loopback check accepts it)
 
     Tailnet IPs, the Docker bridge gateway IP, and any forwarded request from
     the published port are all rejected on purpose. If a future feature needs to
@@ -167,12 +169,20 @@ def _require_localhost(request: Request) -> None:
     (e.g., POST /admin/api/nightly-compact/run) that goes through the existing
     cookie-based auth_middleware and then calls nightly_compact() directly.
     The /internal/* path is reserved for in-process / in-container callers.
+
+    Loopback recognition uses ipaddress.ip_address().is_loopback which on
+    Python 3.12+ correctly handles 127.0.0.1, ::1, AND IPv4-mapped IPv6 like
+    ::ffff:127.0.0.1 (which some Linux dual-stack uvicorn configs serve as
+    the loopback address).
     """
     client = request.client
     if client is None:
         return
-    if client.host in ("127.0.0.1", "::1", "localhost"):
-        return
+    try:
+        if ipaddress.ip_address(client.host).is_loopback:
+            return
+    except ValueError:
+        pass  # not a parseable IP — fall through to 403
     raise HTTPException(status_code=403, detail="localhost only")
 
 
