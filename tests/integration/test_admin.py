@@ -209,7 +209,7 @@ class TestSettings:
         resp = await client.get("/admin/api/settings")
         assert resp.status_code == 200
         data = resp.json()
-        expected_keys = {"agent_name", "model", "max_steps", "auto_reply_timeout", "session_idle_timeout", "heartbeat_interval", "buffer_time", "nightly_compact_hour", "line_trigger_prefix"}
+        expected_keys = {"agent_name", "model", "max_steps", "auto_reply_timeout", "session_idle_timeout", "heartbeat_interval", "buffer_time", "nightly_compact_hour", "nightly_compact_threshold", "line_trigger_prefix"}
         assert set(data.keys()) == expected_keys
         for key, val in data.items():
             assert isinstance(val, str), f"Setting {key} should be string, got {type(val)}"
@@ -243,6 +243,51 @@ class TestSettings:
         data = resp.json()
         for key, expected in new_settings.items():
             assert data[key] == expected, f"Setting {key}: expected {expected}, got {data[key]}"
+
+    @pytest.mark.asyncio
+    async def test_put_settings_nightly_compact_threshold(self, client):
+        await _login(client)
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"nightly_compact_threshold": "12345"},
+        )
+        assert resp.status_code == 200
+        resp = await client.get("/admin/api/settings")
+        data = resp.json()
+        assert data["nightly_compact_threshold"] == "12345"
+
+    @pytest.mark.asyncio
+    async def test_put_settings_nightly_compact_threshold_rejects_non_numeric(self, client):
+        """Garbage threshold values must be rejected at write-time so the dashboard
+        never displays a value that nightly_compact() will silently ignore."""
+        await _login(client)
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"nightly_compact_threshold": "abc"},
+        )
+        assert resp.status_code == 400
+        # Confirm the bad value was NOT persisted
+        resp = await client.get("/admin/api/settings")
+        data = resp.json()
+        assert data["nightly_compact_threshold"] != "abc"
+
+    @pytest.mark.asyncio
+    async def test_put_settings_nightly_compact_threshold_rejects_zero(self, client):
+        await _login(client)
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"nightly_compact_threshold": "0"},
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_put_settings_nightly_compact_threshold_rejects_negative(self, client):
+        await _login(client)
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"nightly_compact_threshold": "-100"},
+        )
+        assert resp.status_code == 400
 
 
 class TestPermissions:

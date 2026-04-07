@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
 
 router = APIRouter(prefix="/api/settings")
 
@@ -20,6 +21,7 @@ _ALLOWED_KEYS: dict[str, tuple[str, str | None]] = {
     "heartbeat_interval": ("1800", "HEARTBEAT_INTERVAL"),
     "buffer_time": ("10", "BUFFER_TIME"),
     "nightly_compact_hour": ("3", "NIGHTLY_COMPACT_HOUR"),
+    "nightly_compact_threshold": ("50000", "NIGHTLY_COMPACT_THRESHOLD"),
     "line_trigger_prefix": ("小牛兒", "LINE_TRIGGER_PREFIX"),
 }
 
@@ -57,6 +59,25 @@ async def get_settings(request: Request):
 @router.put("")
 async def put_settings(request: Request):
     body = await request.json()
+
+    # Validate strict-positive int keys before persisting. Without this, garbage
+    # values would be displayed by GET but silently ignored by nightly_compact()
+    # (which validates internally and falls back to default), causing dashboard
+    # vs runtime divergence.
+    if "nightly_compact_threshold" in body:
+        try:
+            n = int(str(body["nightly_compact_threshold"]).strip())
+        except (ValueError, TypeError, AttributeError):
+            return JSONResponse(
+                {"error": "nightly_compact_threshold must be a positive integer"},
+                status_code=400,
+            )
+        if n <= 0:
+            return JSONResponse(
+                {"error": "nightly_compact_threshold must be > 0"},
+                status_code=400,
+            )
+
     path = _settings_path(request)
     current = _read_settings(path)
     for key in _ALLOWED_KEYS:
