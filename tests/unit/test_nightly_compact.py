@@ -320,3 +320,84 @@ class TestNightlyCompactThreshold:
         row = await store.get("web:hot")
         assert row["session_id"] == "new-sid"
         assert row["last_compacted_at"] is not None
+
+
+class TestNightlyCompactLogging:
+    """Verifies nightly_compact emits the log lines operators rely on to debug
+    threshold behavior. Phase 3 curl verification noted a partial pass on Check L:
+    no log output was visible from the compact job, leaving operators blind to
+    what threshold was actually in use at runtime. These tests pin the log
+    contract so a future refactor can't silently drop the threshold value from
+    the log lines.
+    """
+
+    @pytest_asyncio.fixture
+    async def store(self, tmp_path):
+        s = SessionStore(str(tmp_path / "test.db"))
+        await s.init()
+        yield s
+        await s.close()
+
+    @pytest.mark.asyncio
+    async def test_logs_no_eligible_with_threshold_value(
+        self, store, tmp_path, monkeypatch, caplog
+    ):
+        """Empty-session run must log 'no eligible sessions (threshold=<N>)'
+        so operators can see what threshold was in effect on an idle night."""
+        import logging
+        from unittest.mock import MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "4242"}'
+        )
+
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+
+        with caplog.at_level(logging.INFO, logger="raisebull.heartbeat"):
+            await nightly_compact(runner, store, buffer=None)
+
+        # The "no eligible" log MUST include the threshold value so an operator
+        # can confirm the dashboard-configured threshold actually took effect.
+        assert "no eligible sessions" in caplog.text
+        assert "threshold=4242" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_logs_per_session_tokens_and_threshold(
+        self, store, tmp_path, monkeypatch, caplog
+    ):
+        """For each eligible session, the log line must include BOTH the token
+        count AND the threshold so operators can see which sessions qualified
+        and by how much."""
+        import logging
+        from unittest.mock import AsyncMock, MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "1000"}'
+        )
+
+        await store.save("web:hot", session_id="orig", domain="web", token_count=3500)
+
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+        compact_result = MagicMock(error=None, session_id="new-sid", output_tokens=800)
+        consolidate_result = MagicMock(error=None, session_id=None, output_tokens=10)
+        runner.run = AsyncMock(side_effect=[compact_result, consolidate_result])
+
+        with caplog.at_level(logging.INFO, logger="raisebull.heartbeat"):
+            await nightly_compact(runner, store, buffer=None)
+
+        # Per-session line format: "Nightly compact: <key> (tokens=<N>, threshold=<M>)"
+        assert "Nightly compact: web:hot" in caplog.text
+        assert "tokens=3500" in caplog.text
+        assert "threshold=1000" in caplog.text
+        # Consolidate completion log must also appear so operators know the run finished
+        assert "Nightly consolidate complete" in caplog.text
