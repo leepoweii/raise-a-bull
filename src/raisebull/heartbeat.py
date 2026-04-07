@@ -167,17 +167,22 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
     """Run nightly compact + consolidate. Called by scheduler at configured hour."""
     from datetime import timezone
 
+    threshold = _read_threshold(runner.workspace or "/app/workspace")
+
     all_sessions = await sessions.list_all()
-    eligible = [s for s in all_sessions if is_compact_eligible(s, key=s["key"])]
+    eligible = [
+        s for s in all_sessions
+        if is_compact_eligible(s, key=s["key"], threshold=threshold)
+    ]
 
     if not eligible:
-        logger.info("Nightly compact: no eligible sessions")
+        logger.info("Nightly compact: no eligible sessions (threshold=%d)", threshold)
         return
 
     for s in eligible:
         key = s["key"]
         session_id = s["session_id"]
-        logger.info("Nightly compact: %s (tokens=%d)", key, s["token_count"])
+        logger.info("Nightly compact: %s (tokens=%d, threshold=%d)", key, s["token_count"], threshold)
 
         # Step 1: inject unprocessed buffer into session
         if buffer:

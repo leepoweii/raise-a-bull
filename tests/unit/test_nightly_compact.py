@@ -208,3 +208,58 @@ class TestReadThreshold:
         nonexistent = tmp_path / "does-not-exist"
         from raisebull.heartbeat import _read_threshold
         assert _read_threshold(str(nonexistent)) == 50000
+
+
+class TestNightlyCompactThreshold:
+    @pytest_asyncio.fixture
+    async def store(self, tmp_path):
+        s = SessionStore(str(tmp_path / "test.db"))
+        await s.init()
+        yield s
+        await s.close()
+
+    @pytest.mark.asyncio
+    async def test_nightly_compact_uses_threshold_from_settings(
+        self, store, tmp_path, monkeypatch
+    ):
+        """nightly_compact reads threshold from workspace/config/settings.json."""
+        from unittest.mock import AsyncMock, MagicMock
+        from raisebull.heartbeat import nightly_compact
+
+        # Seed sessions: one above custom threshold (1000), one below
+        await store.save("web:above", session_id="orig-above", domain="web", token_count=2000)
+        await store.save("web:below", session_id="orig-below", domain="web", token_count=500)
+
+        # Write settings.json with low threshold so "above" becomes eligible
+        workspace = tmp_path / "workspace"
+        (workspace / "config").mkdir(parents=True)
+        (workspace / "config" / "settings.json").write_text(
+            '{"nightly_compact_threshold": "1000"}'
+        )
+
+        # Mock runner: /compact returns a new session id, consolidate is no-op
+        runner = MagicMock()
+        runner.workspace = str(workspace)
+        compact_result = MagicMock(error=None, session_id="new-above-sid", output_tokens=900)
+        consolidate_result = MagicMock(error=None, session_id=None, output_tokens=10)
+        runner.run = AsyncMock(side_effect=[compact_result, consolidate_result])
+
+        monkeypatch.delenv("NIGHTLY_COMPACT_THRESHOLD", raising=False)
+
+        await nightly_compact(runner, store, buffer=None)
+
+        # "above" was compacted: new session_id, token_count updated
+        above = await store.get("web:above")
+        assert above["session_id"] == "new-above-sid"
+        assert above["last_compacted_at"] is not None
+
+        # "below" untouched
+        below = await store.get("web:below")
+        assert below["session_id"] == "orig-below"
+        assert below["last_compacted_at"] is None
+        assert below["token_count"] == 500
+
+        # runner.run called exactly twice: once for /compact, once for consolidate
+        assert runner.run.call_count == 2
+        first_call_prompt = runner.run.call_args_list[0].args[0]
+        assert first_call_prompt == "/compact"
