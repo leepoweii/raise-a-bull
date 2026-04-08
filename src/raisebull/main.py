@@ -163,21 +163,7 @@ async def lifespan(app: FastAPI):
     _admin_app.state.audit_log = _audit_log
 
     # Wire heartbeat → Discord push via the bot's channel cache
-    async def heartbeat_push(channel_name: str, message: str) -> None:
-        bot_instance = get_bot()
-        if bot_instance is None:
-            logger.warning("Heartbeat push: bot not running, skipping #%s", channel_name)
-            return
-        guild = bot_instance.guilds[0] if bot_instance.guilds else None
-        if guild is None:
-            return
-        channel = discord.utils.get(guild.text_channels, name=channel_name)
-        if channel:
-            await channel.send(message[:2000])
-        else:
-            logger.warning("Heartbeat push: #%s not found", channel_name)
-
-    _heartbeat_push = heartbeat_push
+    _heartbeat_push = _heartbeat_push_impl
     start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push, buffer=_message_buffer, audit_log=_audit_log)
 
     if os.getenv("DISCORD_BOT_TOKEN"):
@@ -238,6 +224,33 @@ from pydantic import BaseModel as _BaseModel
 class DiscordPushRequest(_BaseModel):
     channel_id: str
     message: str
+
+
+async def _heartbeat_push_impl(channel_name: str, message: str) -> None:
+    """Push a heartbeat-triggered message to a Discord text channel.
+
+    Records a scheduler.discord_push audit event on successful send.
+    Extracted from lifespan for direct testability.
+    """
+    bot_instance = get_bot()
+    if bot_instance is None:
+        logger.warning("Heartbeat push: bot not running, skipping #%s", channel_name)
+        return
+    guild = bot_instance.guilds[0] if bot_instance.guilds else None
+    if guild is None:
+        return
+    channel = discord.utils.get(guild.text_channels, name=channel_name)
+    if channel:
+        await channel.send(message[:2000])
+        if _audit_log is not None:
+            await _audit_log.record(
+                "scheduler.discord_push",
+                actor="scheduler",
+                target=channel_name,
+                after_val=message[:200],
+            )
+    else:
+        logger.warning("Heartbeat push: #%s not found", channel_name)
 
 
 def _require_localhost(request: Request) -> None:

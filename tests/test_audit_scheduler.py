@@ -102,3 +102,64 @@ async def test_scheduler_nightly_compact_recorded(monkeypatch, tmp_path):
     assert rows[0]["action"] == "scheduler.nightly_compact"
     assert rows[0]["actor"] == "scheduler"
     await al.close()
+
+
+@pytest.mark.asyncio
+async def test_scheduler_discord_push_records_truncated_message(monkeypatch, tmp_path):
+    """The heartbeat_push callback records only the first 200 chars of content."""
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+    monkeypatch.setenv("WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("CREDENTIALS_DB_PATH", str(tmp_path / "creds.db"))
+
+    import sys
+    # Remove cached main module so env vars take effect on re-import
+    sys.modules.pop("raisebull.main", None)
+
+    import raisebull.main as main
+
+    al = AuditLog(":memory:")
+    await al.init()
+    monkeypatch.setattr(main, "_audit_log", al)
+
+    # Build a fake bot with one guild + one text_channel
+    class _FakeChannel:
+        name = "daily-ops"
+        sent: list[str] = []
+
+        async def send(self, msg):
+            self.sent.append(msg)
+
+    class _FakeGuild:
+        text_channels = [_FakeChannel()]
+
+    class _FakeBot:
+        guilds = [_FakeGuild()]
+
+    monkeypatch.setattr(main, "get_bot", lambda: _FakeBot())
+
+    # Re-create the push callback with the stubbed _audit_log visible
+    # (the real one is closured in lifespan — we need to call it here)
+    # For testability, the implementation uses the module-level _audit_log
+    # so we can call it directly.
+    import discord  # noqa: F401 — matches production import path
+
+    long_message = "X" * 500
+
+    # Call the push callback function directly. The implementation
+    # is defined in main.py lifespan; we access it via main._heartbeat_push
+    # after a minimal lifespan setup. Simpler: instantiate a standalone
+    # function mirroring the one in lifespan, but since this test targets
+    # the real callback, we call main.lifespan's internal helper by
+    # extracting it via monkeypatch. For now, call the module-level
+    # helper `_heartbeat_push_impl` we will add in Step 3.
+    from raisebull.main import _heartbeat_push_impl
+    await _heartbeat_push_impl("daily-ops", long_message)
+
+    rows = await al.list_recent(limit=10)
+    assert len(rows) == 1
+    assert rows[0]["action"] == "scheduler.discord_push"
+    assert rows[0]["actor"] == "scheduler"
+    assert rows[0]["target"] == "daily-ops"
+    assert rows[0]["after_val"] == "X" * 200  # truncated to 200 chars
+    await al.close()
