@@ -28,21 +28,24 @@ window.auditPage = function() {
             return this.fetchedRows.filter(r => this.selectedActions.has(r.action));
         },
 
+        getApp() {
+            const appEl = document.querySelector('[x-data]');
+            return Alpine.evaluate(appEl, '$data');
+        },
+
         async load() {
             this.loading = true;
             this.error = null;
             try {
                 const from = `${this.fromDate}T00:00:00Z`;
                 const to = `${this.toDate}T23:59:59Z`;
-                const res = await fetch(
-                    `/admin/api/audit?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`
+                const data = await this.getApp().api(
+                    `/api/audit?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`
                 );
-                if (!res.ok) {
-                    const body = await res.json().catch(() => ({}));
-                    this.error = body.error || `HTTP ${res.status}`;
+                if (data === null) {
+                    // app.api() returns null on error or 401 (which redirects to login)
                     return;
                 }
-                const data = await res.json();
                 this.fetchedRows = data.rows || [];
                 this.truncated = !!data.truncated;
             } catch (e) {
