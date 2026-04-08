@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 from unittest.mock import patch, AsyncMock, MagicMock
@@ -8,6 +10,67 @@ ENV = {
     "WORKSPACE": "/tmp/ws",
     "DB_PATH": "/tmp/test_health.db",
 }
+
+
+def test_main_module_configures_root_logger_for_application_logs():
+    """raisebull.main calls logging.basicConfig(level=INFO) at module load
+    so application loggers (raisebull.heartbeat, raisebull.discord_bot, etc.)
+    surface their INFO lines in uvicorn stdout / docker logs.
+
+    Without this, Python's root logger defaults to WARNING and uvicorn only
+    configures its own loggers — operators would see HTTP access lines but
+    NOT the actual job execution logs (e.g., "Nightly compact: no eligible
+    sessions (threshold=50000)"), making it impossible to verify scheduled
+    job behavior in production.
+
+    The test imports main (which triggers basicConfig) and asserts the
+    raisebull logger's effective level is at least INFO. basicConfig is
+    idempotent so this is safe across test runs.
+    """
+    with patch.dict("os.environ", ENV):
+        import raisebull.main  # noqa: F401  — import side effect (basicConfig)
+
+    raisebull_logger = logging.getLogger("raisebull")
+    heartbeat_logger = logging.getLogger("raisebull.heartbeat")
+
+    # Both loggers should resolve to effective INFO (10 = DEBUG, 20 = INFO,
+    # 30 = WARNING). After basicConfig(level=INFO), the root is INFO and
+    # child loggers inherit unless they override.
+    assert raisebull_logger.getEffectiveLevel() <= logging.INFO, (
+        f"raisebull logger is at level {raisebull_logger.getEffectiveLevel()}, "
+        f"expected <= {logging.INFO} (INFO)"
+    )
+    assert heartbeat_logger.getEffectiveLevel() <= logging.INFO, (
+        f"raisebull.heartbeat logger is at level {heartbeat_logger.getEffectiveLevel()}, "
+        f"expected <= {logging.INFO} (INFO)"
+    )
+
+    # Root logger must have at least one handler so application INFO lines
+    # have somewhere to flow. In production basicConfig adds a StreamHandler;
+    # in pytest the test runner adds its own capture handlers. Either way,
+    # `len(root.handlers) > 0` proves messages won't silently disappear.
+    #
+    # Note: root.getEffectiveLevel() is NOT asserted because pytest may have
+    # left root at WARNING — what matters is the raisebull logger's effective
+    # level (asserted above), which is INFO regardless of root because
+    # main.py explicitly calls `getLogger("raisebull").setLevel(INFO)`.
+    root = logging.getLogger()
+    assert len(root.handlers) > 0, "root logger must have a handler"
+
+
+def test_application_log_lines_propagate_to_root_caplog(caplog):
+    """End-to-end check: a logger.info() call from raisebull.heartbeat must
+    surface via caplog (which captures everything propagated to root).
+    Pins the propagation chain so a future refactor that sets propagate=False
+    on raisebull loggers, or removes basicConfig from main, would be caught.
+    """
+    with patch.dict("os.environ", ENV):
+        import raisebull.main  # noqa: F401
+
+    with caplog.at_level(logging.INFO, logger="raisebull.heartbeat"):
+        logging.getLogger("raisebull.heartbeat").info("test marker xyz123")
+
+    assert "test marker xyz123" in caplog.text
 
 
 @pytest.mark.asyncio

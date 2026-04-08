@@ -36,6 +36,33 @@ from raisebull.admin import create_admin_app
 
 load_dotenv()
 
+# Configure application logging at module load so logger.info() calls from
+# raisebull.heartbeat, raisebull.discord_bot, raisebull.session, etc. surface
+# in uvicorn stdout / docker logs. Without this, Python's root logger defaults
+# to WARNING and uvicorn only configures its own loggers (uvicorn,
+# uvicorn.access, uvicorn.error) — application INFO lines like "Nightly
+# compact: no eligible sessions (threshold=50000)" are silently dropped,
+# leaving operators blind to scheduled job behavior.
+#
+# Two-step setup for robustness:
+#   1. basicConfig — adds a StreamHandler to the root logger if root has no
+#      handlers (the production uvicorn case). Idempotent: no-op when root
+#      already has handlers (the pytest-with-log-capture case). Provides the
+#      DEFAULT FORMAT used in production stdout.
+#   2. setLevel on the raisebull logger — explicitly enables INFO emission
+#      from all raisebull.* descendants regardless of what configured root.
+#      This is the deterministic step: it ensures the FILTER is correct even
+#      if step 1 was a no-op (e.g., pytest already added root handlers at a
+#      higher level).
+#
+# uvicorn's own loggers set propagate=False so we don't get double-logging
+# on uvicorn lines.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)-8s %(name)s: %(message)s",
+)
+logging.getLogger("raisebull").setLevel(logging.INFO)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
