@@ -178,7 +178,7 @@ async def lifespan(app: FastAPI):
             logger.warning("Heartbeat push: #%s not found", channel_name)
 
     _heartbeat_push = heartbeat_push
-    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push, buffer=_message_buffer)
+    start_heartbeat(_runner, _sessions, push_fn=_heartbeat_push, buffer=_message_buffer, audit_log=_audit_log)
 
     if os.getenv("DISCORD_BOT_TOKEN"):
         async def _discord_task() -> None:
@@ -352,7 +352,7 @@ async def heartbeat_trigger(request: Request) -> dict[str, Any]:
             actor="system",
             source_ip=request.client.host if request.client else None,
         )
-    asyncio.create_task(run_event_check(_runner, _sessions, push_fn=_heartbeat_push))
+    asyncio.create_task(run_event_check(_runner, _sessions, push_fn=_heartbeat_push, audit_log=_audit_log))
     return {"ok": True, "message": "heartbeat tick started"}
 
 
@@ -366,5 +366,5 @@ async def nightly_compact_trigger(request: Request) -> dict[str, Any]:
             actor="system",
             source_ip=request.client.host if request.client else None,
         )
-    asyncio.create_task(nightly_compact(_runner, _sessions, buffer=_message_buffer))
+    asyncio.create_task(nightly_compact(_runner, _sessions, buffer=_message_buffer, audit_log=_audit_log))
     return {"ok": True, "message": "nightly compact started"}

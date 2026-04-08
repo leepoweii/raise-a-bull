@@ -17,6 +17,7 @@ from typing import Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from raisebull.audit import AuditLog
 from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
 
@@ -123,7 +124,14 @@ def parse_channel_messages(text: str) -> list[tuple[str, str]]:
     return results
 
 
-async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=None) -> None:
+async def _heartbeat_tick(
+    runner: ClaudeRunner,
+    sessions: SessionStore,
+    push_fn=None,
+    audit_log: AuditLog | None = None,
+) -> None:
+    if audit_log is not None:
+        await audit_log.record("scheduler.heartbeat", actor="scheduler")
     global _last_heartbeat_response, _last_heartbeat_time
     now = datetime.now()
     workspace = runner.workspace or "/app/workspace"
@@ -170,7 +178,12 @@ async def _heartbeat_tick(runner: ClaudeRunner, sessions: SessionStore, push_fn=
         logger.exception("Heartbeat tick failed")
 
 
-async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=None) -> None:
+async def nightly_compact(
+    runner: ClaudeRunner,
+    sessions: SessionStore,
+    buffer=None,
+    audit_log: AuditLog | None = None,
+) -> None:
     """Run nightly compact + consolidate. Called by scheduler at configured hour.
 
     Serialized via _nightly_lock so concurrent invocations (cron + manual trigger)
@@ -179,6 +192,8 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
     from datetime import timezone
 
     async with _nightly_lock:
+        if audit_log is not None:
+            await audit_log.record("scheduler.nightly_compact", actor="scheduler")
         threshold = _read_threshold(runner.workspace or "/app/workspace")
 
         all_sessions = await sessions.list_all()
@@ -251,7 +266,13 @@ async def nightly_compact(runner: ClaudeRunner, sessions: SessionStore, buffer=N
         logger.info("Nightly consolidate complete")
 
 
-def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, buffer=None) -> None:
+def start_heartbeat(
+    runner: ClaudeRunner,
+    sessions: SessionStore,
+    push_fn=None,
+    buffer=None,
+    audit_log: AuditLog | None = None,
+) -> None:
     global _scheduler
     if HEARTBEAT_INTERVAL <= 0:
         logger.info("Heartbeat disabled (interval <= 0)")
@@ -260,7 +281,7 @@ def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, 
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
         _heartbeat_tick, "interval", seconds=HEARTBEAT_INTERVAL,
-        args=[runner, sessions, push_fn], max_instances=1,
+        args=[runner, sessions, push_fn, audit_log], max_instances=1,
     )
 
     # Nightly compact job
@@ -270,7 +291,7 @@ def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, 
         "cron",
         hour=compact_hour,
         minute=0,
-        args=[runner, sessions, buffer],
+        args=[runner, sessions, buffer, audit_log],
         id="nightly_compact",
     )
     logger.info("Nightly compact scheduled at %02d:00", compact_hour)
@@ -279,5 +300,10 @@ def start_heartbeat(runner: ClaudeRunner, sessions: SessionStore, push_fn=None, 
     logger.info("Heartbeat started: interval=%ds", HEARTBEAT_INTERVAL)
 
 
-async def run_event_check(runner: ClaudeRunner, sessions: SessionStore, push_fn=None) -> None:
-    await _heartbeat_tick(runner, sessions, push_fn=push_fn)
+async def run_event_check(
+    runner: ClaudeRunner,
+    sessions: SessionStore,
+    push_fn=None,
+    audit_log: AuditLog | None = None,
+) -> None:
+    await _heartbeat_tick(runner, sessions, push_fn=push_fn, audit_log=audit_log)
