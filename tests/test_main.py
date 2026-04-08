@@ -73,6 +73,41 @@ def test_application_log_lines_propagate_to_root_caplog(caplog):
     assert "test marker xyz123" in caplog.text
 
 
+def test_log_level_env_var_overrides_default():
+    """LOG_LEVEL env var (default INFO) controls the raisebull logger level
+    so privacy-sensitive deployments can suppress INFO chatter without
+    forking. Sets LOG_LEVEL=WARNING via patch.dict, re-imports main to
+    re-execute the module-level setLevel call, asserts the raisebull logger
+    is now at WARNING.
+
+    Codex flagged the original hardcoded setLevel(INFO) as a regression for
+    deployments with deliberate WARNING/ERROR policies — this env var
+    closes that hole while keeping INFO as the friendly default.
+    """
+    import importlib
+
+    import raisebull.main
+
+    # Override + reload to re-trigger the module-level basicConfig + setLevel
+    override_env = {**ENV, "LOG_LEVEL": "WARNING"}
+    with patch.dict("os.environ", override_env):
+        importlib.reload(raisebull.main)
+
+    raisebull_logger = logging.getLogger("raisebull")
+    heartbeat_logger = logging.getLogger("raisebull.heartbeat")
+    assert raisebull_logger.getEffectiveLevel() == logging.WARNING, (
+        f"LOG_LEVEL=WARNING should set raisebull to WARNING, got "
+        f"{raisebull_logger.getEffectiveLevel()}"
+    )
+    assert heartbeat_logger.getEffectiveLevel() == logging.WARNING
+
+    # Restore default INFO so other tests are unaffected (reload main with
+    # the original ENV — which has no LOG_LEVEL → defaults to INFO)
+    with patch.dict("os.environ", ENV):
+        importlib.reload(raisebull.main)
+    assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
+
+
 @pytest.mark.asyncio
 async def test_health_check():
     with patch.dict("os.environ", ENV):

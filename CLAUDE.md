@@ -215,6 +215,7 @@ The hook also auto-runs the LLM-free Playwright e2e subset (~5-15s) — it spawn
 | `MINIMAX_API_KEY` | optional | MiniMax M2.7 instead of Claude |
 | `CLAUDE_MODEL` | optional | Default: `claude-sonnet-4-6` |
 | `NIGHTLY_COMPACT_THRESHOLD` | optional | Token threshold for nightly compact (default `50000`). Overridden by `nightly_compact_threshold` in `settings.json` if present |
+| `LOG_LEVEL` | optional | Application logger level (default `INFO`). Set `WARNING` or `ERROR` to suppress chatty INFO output. Affects the `raisebull.*` logger family — does not change uvicorn's own loggers |
 | `SERPER_API_KEY` | optional | Enables MCP search (free: serper.dev/signup) |
 | `JINA_API_KEY` | optional | Enables MCP browse (free: jina.ai) |
 | `GEMINI_API_KEY` | optional | Enables image vision (free: aistudio.google.com/apikey) |

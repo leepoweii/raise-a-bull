@@ -44,24 +44,32 @@ load_dotenv()
 # compact: no eligible sessions (threshold=50000)" are silently dropped,
 # leaving operators blind to scheduled job behavior.
 #
+# Configurable via LOG_LEVEL env var (default INFO). Deployments that want
+# to suppress chatty INFO output can set LOG_LEVEL=WARNING in their .env —
+# useful for privacy-sensitive cases since some INFO lines include session
+# keys (e.g., "discord:1490304831116673064") and first-50-chars of heartbeat
+# outputs (in the channel push path at heartbeat.py:117). Default INFO is
+# the right call for samantha-wsl ops where the operator owns all the data,
+# but the override exists for hosted/multi-tenant scenarios.
+#
 # Two-step setup for robustness:
 #   1. basicConfig — adds a StreamHandler to the root logger if root has no
 #      handlers (the production uvicorn case). Idempotent: no-op when root
 #      already has handlers (the pytest-with-log-capture case). Provides the
 #      DEFAULT FORMAT used in production stdout.
-#   2. setLevel on the raisebull logger — explicitly enables INFO emission
-#      from all raisebull.* descendants regardless of what configured root.
-#      This is the deterministic step: it ensures the FILTER is correct even
-#      if step 1 was a no-op (e.g., pytest already added root handlers at a
-#      higher level).
+#   2. setLevel on the raisebull logger — explicitly enables emission at the
+#      configured level for all raisebull.* descendants regardless of what
+#      configured root. Deterministic: works even if step 1 was a no-op
+#      (e.g., pytest already added root handlers at a higher level).
 #
 # uvicorn's own loggers set propagate=False so we don't get double-logging
 # on uvicorn lines.
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(levelname)-8s %(name)s: %(message)s",
 )
-logging.getLogger("raisebull").setLevel(logging.INFO)
+logging.getLogger("raisebull").setLevel(_LOG_LEVEL)
 
 logger = logging.getLogger(__name__)
 
