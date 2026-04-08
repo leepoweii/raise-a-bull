@@ -57,8 +57,20 @@ async def login_endpoint(request: Request):
     body = await request.json()
     password = body.get("password", "")
     expected = _get_password()
+    audit_log = getattr(request.app.state, "audit_log", None)
+    source_ip = request.client.host if request.client else None
+
     if not expected or not hmac.compare_digest(password, expected):
+        if audit_log is not None:
+            await audit_log.record(
+                "login.fail", actor="unknown", source_ip=source_ip
+            )
         return JSONResponse({"error": "Invalid password"}, status_code=401)
+
+    if audit_log is not None:
+        await audit_log.record(
+            "login.success", actor="admin", source_ip=source_ip
+        )
     response = JSONResponse({"ok": True})
     create_session_cookie(response)
     return response
