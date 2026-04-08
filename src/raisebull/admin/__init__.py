@@ -41,6 +41,7 @@ def create_admin_app(
     from raisebull.admin.routes_permissions import router as permissions_router
     from raisebull.admin.routes_models import router as models_router
     from raisebull.admin.routes_chat import router as chat_router
+    from raisebull.admin.routes_audit import router as audit_router
 
     app.include_router(status_router)
     app.include_router(context_router)
@@ -51,6 +52,7 @@ def create_admin_app(
     app.include_router(permissions_router)
     app.include_router(models_router)
     app.include_router(chat_router)
+    app.include_router(audit_router)
 
     # Static files with no-cache headers (force revalidation on every load)
     static_dir = Path(__file__).parent / "static"
