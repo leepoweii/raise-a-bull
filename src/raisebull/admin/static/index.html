@@ -29,6 +29,7 @@
             <a href="#/heartbeat" :class="{ active: page === 'heartbeat' }" @click="go('heartbeat'); menuOpen=false">&#9200; Heartbeat</a>
             <a href="#/permissions" :class="{ active: page === 'permissions' }" @click="go('permissions'); menuOpen=false">&#128274; Permissions</a>
             <a href="#/settings" :class="{ active: page === 'settings' }" @click="go('settings'); menuOpen=false">&#9881; Settings</a>
+            <a href="#/audit" :class="{ active: page === 'audit' }" @click="go('audit'); menuOpen=false">&#128196; Audit</a>
         </div>
         <div class="sidebar-footer">
             <button class="theme-toggle" @click="toggleTheme()" x-text="theme === 'dark' ? '☀️' : '🌙'"></button>

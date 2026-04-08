@@ -1,0 +1,95 @@
+<h1 class="page-title">Audit Log</h1>
+
+<div x-data="auditPage()" x-init="init()">
+    <div class="card">
+        <div class="settings-form">
+            <div class="form-group">
+                <label>From</label>
+                <input type="date" x-model="fromDate">
+            </div>
+            <div class="form-group">
+                <label>To</label>
+                <input type="date" x-model="toDate">
+            </div>
+        </div>
+        <button class="btn btn-primary" @click="load()" :disabled="loading"
+                x-text="loading ? 'Loading...' : 'Load'"></button>
+    </div>
+
+    <div class="card">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-start;">
+            <template x-for="cat in categories" :key="cat.name">
+                <div style="min-width:160px; padding:8px; border:2px solid var(--border); margin-bottom:4px;">
+                    <strong x-text="cat.name" style="display:block; margin-bottom:6px;"></strong>
+                    <template x-for="action in cat.actions" :key="action">
+                        <label style="display:flex; align-items:center; gap:6px; margin-bottom:4px; cursor:pointer;">
+                            <input
+                                type="checkbox"
+                                :value="action"
+                                :checked="selectedActions.has(action)"
+                                @change="toggleAction(action)"
+                            >
+                            <span x-text="action" style="font-size:0.85em; font-family:monospace;"></span>
+                        </label>
+                    </template>
+                </div>
+            </template>
+        </div>
+        <div style="margin-top:8px; display:flex; gap:8px;">
+            <button class="btn" @click="selectAll()">All</button>
+            <button class="btn" @click="selectNone()">None</button>
+        </div>
+    </div>
+
+    <template x-if="error">
+        <div class="card" style="color:var(--error);" x-text="error"></div>
+    </template>
+
+    <template x-if="truncated">
+        <div class="card" style="background:var(--warning-bg, #fff3cd); border-color:var(--warning, #ffc107);">
+            &#9888; Truncated: showing first 500 rows. Narrow the date range to see all.
+        </div>
+    </template>
+
+    <div class="card">
+        <p style="margin-bottom:8px;">
+            Showing <strong x-text="filteredRows.length"></strong> of
+            <strong x-text="fetchedRows.length"></strong> entries
+        </p>
+
+        <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-size:0.9em;">
+                <thead>
+                    <tr>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Time (UTC)</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Actor</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Action</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Target</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Before &#8594; After</th>
+                        <th style="text-align:left; padding:6px 8px; border-bottom:2px solid var(--border);">Source IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="row in filteredRows" :key="row.id">
+                        <tr style="border-bottom:1px solid var(--border);">
+                            <td style="padding:6px 8px; font-family:monospace; white-space:nowrap;" x-text="formatTs(row.ts)"></td>
+                            <td style="padding:6px 8px;" x-text="row.actor"></td>
+                            <td style="padding:6px 8px; font-family:monospace;" x-text="row.action"></td>
+                            <td style="padding:6px 8px;" x-text="row.target || ''"></td>
+                            <td style="padding:6px 8px; font-family:monospace; font-size:0.85em;">
+                                <template x-if="row.before_val !== null || row.after_val !== null">
+                                    <span>
+                                        <span x-text="row.before_val || '&#8709;'"></span>
+                                        &#8594;
+                                        <span x-text="row.after_val || '&#8709;'"></span>
+                                    </span>
+                                </template>
+                            </td>
+                            <td style="padding:6px 8px; font-family:monospace; font-size:0.85em;" x-text="row.source_ip || ''"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
