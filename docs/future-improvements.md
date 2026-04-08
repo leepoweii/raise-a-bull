@@ -339,3 +339,51 @@ Final shipped: ~16 commits, 28 tests, ~1-day effort (vs the spec's "3-5 hours" e
 **Scope:** 5 minutes.
 
 **Priority:** LOWEST — purely housekeeping.
+
+---
+
+## Next Session Roadmap
+
+Tracked from **session 2026-04-08** during the post-deploy review of `feat/audit-logs`. Items 7-13 above describe the WHAT; this section organizes them into session-sized chunks with explicit priority tiers so future sessions can grab one and run.
+
+### 🥇 Tier 1 — High value, small scope (~half session each, batchable)
+
+| ID | Item | Maps to | Why |
+|----|------|---------|-----|
+| **N1** | `credentials.put` audit hook with redaction | item 7d | HIGHEST forensics value (currently invisible "who changed my API key"), trivial scope, no design ambiguity. Record `target=key_name`, `after_val="***<last 4>"`, never log full value. ~3 tests + ~10 lines in `routes_credentials.py`. |
+| **N2** | Fix `nightly_compact_threshold round-trips` e2e flake | item 11 | Pre-existing flaky e2e blocks pre-push hook for any future Settings work. Reproduce → identify (timing/locator/real bug) → fix with minimal scope. Unknown effort until reproduced, probably 1 commit. |
+| **N3** | `_normalize_iso` symmetry cleanup | items 9c + 9d | Either delete `_normalize_iso` and have `audit.js` send `+00:00` directly, OR extend it via `datetime.fromisoformat()` for arbitrary offsets. ~10 lines + 2 tests. 30 minutes. |
+
+**📌 SCHEDULED FOR NEXT SESSION:** N1 + N2 + N3 in a single session, in that order.
+
+### 🥈 Tier 2 — Higher value, full session each
+
+| ID | Item | Maps to | Why |
+|----|------|---------|-----|
+| **N4** | Audit log retention policy | item 7a | Auto-prune rows older than `audit_retention_days` (settings.json) inside `nightly_compact()`. Prevents `audit_log` table bloat as bot accumulates events over months. ~1 settings key + ~5 lines + ~3 tests + 1 e2e. |
+| **N5** | Audit dashboard — actor + IP filter + free-text search | item 7b | Currently you can only filter by date + category, so "show me everything from this IP" requires `sqlite3` CLI. Adds `actor=` and `source_ip=` query params + search box on the dashboard. ~4 tests + ~30 lines backend + Alpine.js search input. |
+| **N6** | Discord task shutdown race fix | item 9a | Real bug — `_discord_task()` is fire-and-forget and can call `_audit_log.record()` after the connection is closed in shutdown. Track task handle, cancel + await before closing DBs in lifespan. ~5 lines + 1 test, but shutdown lifecycle tests are fiddly so budget a full session. |
+
+### 🥉 Tier 3 — Lower priority / longer scope
+
+| ID | Item | Maps to | When to do |
+|----|------|---------|-----------|
+| **N7** | Audit log multi-backend export (JSONL/syslog/webhook) | item 7c | Only when there's a real external SIEM integration requirement |
+| **N8** | LINE reply content audit | item 7e | Only when forensics demand cross-session message visibility |
+| **N9** | `AuditLog.record()` try/except wrapping | item 9b | Design choice — defer until a real transient-lock incident in production |
+| **N10** | `openspec/` directory cleanup | item 13 | LOWEST — purely housekeeping, 5 minutes |
+
+### 🪪 Production deploy state (as of 2026-04-08)
+
+`bull-daniu` on samantha-wsl was rebuilt and deployed during this session:
+- Source: `~/Github/raise-a-bull` pulled to commit `38c2028`
+- Container: `bull-daniu` rebuilt via `docker compose up -d --build` from `~/docker/bot-daniu`
+- DB: `audit_log` table auto-created via `CREATE TABLE IF NOT EXISTS`, existing 2 sessions preserved
+- Backup: `~/docker/bot-daniu/workspace/data/sessions.db.pre-audit-log-deploy` (delete after a week if no rollback needed)
+- First production audit row: `(1, 'login.fail', 'unknown', '172.18.0.1')` triggered as smoke test
+
+**No rollback needed.** Production is healthy.
+
+---
+
+**End of file.**
