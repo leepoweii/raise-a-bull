@@ -317,6 +317,98 @@ class TestSettings:
             )
 
 
+class TestSettingsNumericValidation:
+    """Validates that PUT /admin/api/settings rejects invalid numeric values
+    for ALL numeric settings, not just nightly_compact_threshold. The previous
+    PUT validator only handled nightly_compact_threshold; the other 6 numeric
+    settings (max_steps, auto_reply_timeout, session_idle_timeout,
+    heartbeat_interval, buffer_time, nightly_compact_hour) accepted any string
+    and were silently ignored by their runtime consumers. CLAUDE.md flagged
+    this as a "Known gap" — these tests close it.
+
+    Each rejection returns a canonical error message of the form
+    "{key} must be {description}" so clients can parse a single format.
+    """
+
+    # Valid values that MUST persist via PUT round-trip.
+    VALID_CASES = [
+        ("max_steps", "1"),
+        ("max_steps", "100"),
+        ("max_steps", "9999"),
+        ("auto_reply_timeout", "1"),
+        ("auto_reply_timeout", "180"),
+        ("session_idle_timeout", "1"),
+        ("session_idle_timeout", "1800"),
+        ("heartbeat_interval", "0"),       # 0 disables heartbeat (heartbeat.py:256)
+        ("heartbeat_interval", "300"),
+        ("buffer_time", "0"),              # 0 collapses the recent-window
+        ("buffer_time", "10"),
+        ("nightly_compact_hour", "0"),     # midnight
+        ("nightly_compact_hour", "12"),
+        ("nightly_compact_hour", "23"),    # 11pm — boundary
+    ]
+
+    # Invalid values that MUST return 400 with the canonical message.
+    INVALID_CASES = [
+        # max_steps: > 0
+        ("max_steps", "abc", "max_steps must be a positive integer"),
+        ("max_steps", "0", "max_steps must be a positive integer"),
+        ("max_steps", "-5", "max_steps must be a positive integer"),
+        ("max_steps", "", "max_steps must be a positive integer"),
+        ("max_steps", "3.7", "max_steps must be a positive integer"),
+        # auto_reply_timeout: > 0
+        ("auto_reply_timeout", "abc", "auto_reply_timeout must be a positive integer (seconds)"),
+        ("auto_reply_timeout", "0", "auto_reply_timeout must be a positive integer (seconds)"),
+        ("auto_reply_timeout", "-1", "auto_reply_timeout must be a positive integer (seconds)"),
+        # session_idle_timeout: > 0
+        ("session_idle_timeout", "abc", "session_idle_timeout must be a positive integer (seconds)"),
+        ("session_idle_timeout", "0", "session_idle_timeout must be a positive integer (seconds)"),
+        ("session_idle_timeout", "-100", "session_idle_timeout must be a positive integer (seconds)"),
+        # heartbeat_interval: >= 0 (0 disables)
+        ("heartbeat_interval", "abc", "heartbeat_interval must be a non-negative integer (0 disables heartbeat)"),
+        ("heartbeat_interval", "-1", "heartbeat_interval must be a non-negative integer (0 disables heartbeat)"),
+        ("heartbeat_interval", "-300", "heartbeat_interval must be a non-negative integer (0 disables heartbeat)"),
+        # buffer_time: >= 0
+        ("buffer_time", "abc", "buffer_time must be a non-negative integer (minutes)"),
+        ("buffer_time", "-1", "buffer_time must be a non-negative integer (minutes)"),
+        # nightly_compact_hour: 0..23
+        ("nightly_compact_hour", "abc", "nightly_compact_hour must be an integer between 0 and 23"),
+        ("nightly_compact_hour", "-1", "nightly_compact_hour must be an integer between 0 and 23"),
+        ("nightly_compact_hour", "24", "nightly_compact_hour must be an integer between 0 and 23"),
+        ("nightly_compact_hour", "100", "nightly_compact_hour must be an integer between 0 and 23"),
+        # nightly_compact_threshold (existing behavior preserved)
+        ("nightly_compact_threshold", "abc", "nightly_compact_threshold must be a positive integer"),
+        ("nightly_compact_threshold", "0", "nightly_compact_threshold must be a positive integer"),
+    ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,value", VALID_CASES)
+    async def test_put_accepts_valid_numeric(self, client, key, value):
+        await _login(client)
+        resp = await client.put("/admin/api/settings", json={key: value})
+        assert resp.status_code == 200, (
+            f"{key}={value!r} should be accepted but got {resp.status_code} "
+            f"with body {resp.json()}"
+        )
+        # Verify persisted via round-trip GET
+        resp = await client.get("/admin/api/settings")
+        assert resp.json()[key] == value, (
+            f"{key}={value!r} did not persist; GET returned {resp.json()[key]!r}"
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("key,value,canonical", INVALID_CASES)
+    async def test_put_rejects_invalid_numeric(self, client, key, value, canonical):
+        await _login(client)
+        resp = await client.put("/admin/api/settings", json={key: value})
+        assert resp.status_code == 400, (
+            f"{key}={value!r} should be rejected but got {resp.status_code}"
+        )
+        assert resp.json() == {"error": canonical}, (
+            f"{key}={value!r} produced {resp.json()!r}, expected {{'error': {canonical!r}}}"
+        )
+
+
 class TestPermissions:
     @pytest.mark.asyncio
     async def test_get_permissions_defaults(self, client):

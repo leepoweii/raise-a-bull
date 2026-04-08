@@ -25,6 +25,56 @@ _ALLOWED_KEYS: dict[str, tuple[str, str | None]] = {
     "line_trigger_prefix": ("小牛兒", "LINE_TRIGGER_PREFIX"),
 }
 
+# Per-key constraints for numeric settings. Validated on PUT to prevent
+# garbage values being displayed by GET while their runtime consumers
+# silently fall back to defaults (the dashboard ↔ runtime divergence class
+# of bug). Each entry is (min_value, max_value or None for unbounded,
+# description for the canonical "{key} must be {description}" error).
+#
+# heartbeat_interval and buffer_time accept 0:
+#  - heartbeat_interval=0 disables the heartbeat scheduler (heartbeat.py:256)
+#  - buffer_time=0 collapses the recent-window in MessageBuffer.build_prompt
+#
+# Keys NOT in this dict (agent_name, model, line_trigger_prefix) are
+# string settings and accept any value.
+_NUMERIC_CONSTRAINTS: dict[str, tuple[int, int | None, str]] = {
+    "max_steps": (1, None, "a positive integer"),
+    "auto_reply_timeout": (1, None, "a positive integer (seconds)"),
+    "session_idle_timeout": (1, None, "a positive integer (seconds)"),
+    "heartbeat_interval": (0, None, "a non-negative integer (0 disables heartbeat)"),
+    "buffer_time": (0, None, "a non-negative integer (minutes)"),
+    "nightly_compact_hour": (0, 23, "an integer between 0 and 23"),
+    "nightly_compact_threshold": (1, None, "a positive integer"),
+}
+
+
+def _validate_numeric_setting(key: str, raw_value) -> str | None:
+    """Return canonical error message if invalid, None if valid.
+
+    Validation steps:
+      1. Coerce to int via `int(str(raw_value).strip())`. Catches `ValueError`
+         (non-numeric, empty, whitespace-only, float-like "3.7", "1e5"),
+         `TypeError`, and `AttributeError` (None, dict, etc).
+      2. Enforce min_value <= n (always).
+      3. Enforce n <= max_value if max_value is not None.
+
+    The error message is `f"{key} must be {description}"` for a single
+    canonical format clients can match on by key.
+    """
+    if key not in _NUMERIC_CONSTRAINTS:
+        return None
+    min_val, max_val, description = _NUMERIC_CONSTRAINTS[key]
+    canonical = f"{key} must be {description}"
+    try:
+        n = int(str(raw_value).strip())
+    except (ValueError, TypeError, AttributeError):
+        return canonical
+    if n < min_val:
+        return canonical
+    if max_val is not None and n > max_val:
+        return canonical
+    return None
+
 
 def _settings_path(request: Request) -> Path:
     workspace = request.app.state.workspace_dir
@@ -60,23 +110,18 @@ async def get_settings(request: Request):
 async def put_settings(request: Request):
     body = await request.json()
 
-    # Validate strict-positive int keys before persisting. Without this, garbage
-    # values would be displayed by GET but silently ignored by nightly_compact()
-    # (which validates internally and falls back to default), causing dashboard
-    # vs runtime divergence. Single canonical error message so clients can match
-    # on one string instead of branching on parse-failure vs out-of-range.
-    if "nightly_compact_threshold" in body:
-        raw = body["nightly_compact_threshold"]
-        try:
-            n = int(str(raw).strip())
-            valid = n > 0
-        except (ValueError, TypeError, AttributeError):
-            valid = False
-        if not valid:
-            return JSONResponse(
-                {"error": "nightly_compact_threshold must be a positive integer"},
-                status_code=400,
-            )
+    # Validate every numeric setting present in the body. The first invalid key
+    # wins (deterministic order via _NUMERIC_CONSTRAINTS dict iteration).
+    # Without validation, garbage values would persist via PUT and be displayed
+    # by GET, while runtime consumers (nightly_compact, heartbeat scheduler,
+    # message buffer, etc.) silently fall back to their defaults — causing
+    # dashboard ↔ runtime divergence. The canonical "{key} must be {description}"
+    # message format lets clients parse one structure across all numeric keys.
+    for key in _NUMERIC_CONSTRAINTS:
+        if key in body:
+            err = _validate_numeric_setting(key, body[key])
+            if err:
+                return JSONResponse({"error": err}, status_code=400)
 
     path = _settings_path(request)
     current = _read_settings(path)
