@@ -145,3 +145,44 @@ Bot (any machine)
     → agents-screenshot (internal)
     → future: vector-db, scheduler, etc.
 ```
+
+---
+
+## 6. Audit Logs
+
+**What exists today:** Nothing structured. raise-a-bull has Python `logger.info(...)` lines, uvicorn HTTP access logs, and Claude Code `.jsonl` conversation history — but **no "who did what when" trail** for security/ops forensics.
+
+**What's missing:**
+- Who logged into the dashboard (success/fail attempts)
+- Who changed which setting (key, old value → new value)
+- Who triggered a manual `/internal/heartbeat/trigger` or `/internal/nightly-compact/trigger`
+- Who deleted a session via `DELETE /admin/api/chat/{id}`
+- Source IP of each action (already available via `request.client.host` after the localhost-gate work)
+
+**Why this matters:**
+- **Security forensics:** if a Discord channel suddenly receives a weird message, you want to know whether it came from a real user or `/internal/discord/push` being called (and from where).
+- **Settings drift debugging:** "why is `nightly_compact_threshold` at 9999 instead of 50000?" → audit log shows `2026-04-08 03:42 admin (192.168.1.5) changed nightly_compact_threshold: 50000 → 9999`.
+- **Accountability:** distinguishes user actions from cron jobs from manual triggers in logs.
+
+**Sizing options:**
+
+**Option B (recommended starting point):** Lightweight audit log
+- New SQLite table `audit_log(id, ts, actor, action, target, before, after, source_ip)` in `sessions.db`
+- New `src/raisebull/audit.py` module with a single `record(...)` helper
+- Hook into:
+  - `admin/auth.py` login_endpoint (success + fail, actor=`admin`/`unknown`, source_ip from request.client)
+  - `admin/routes_settings.py` PUT (action=`settings.put`, target=key, before=old value, after=new value)
+  - `admin/routes_chat.py` DELETE (action=`session.delete`, target=session_id)
+  - `main.py` `/internal/*` triggers (action=`internal.heartbeat`/`internal.nightly_compact`/`internal.discord_push`, source_ip)
+- ~3-5 hours, ~5 commits with TDD
+- No dashboard UI yet — just `sqlite3 sessions.db "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 50"` for querying
+
+**Option C (deferred):** Full audit framework
+- Pluggable backend (SQLite + optional file export to JSONL)
+- Retention policy (auto-prune after N days)
+- Dashboard "Audit log" page with search/filter/redaction for sensitive fields
+- Multi-day scope, only worth doing if there's a real compliance need
+
+**Recommendation:** Do Option B in a dedicated session after the current `feat/settings-validation-and-ops-logging` branch ships. Defer Option C until there's an actual compliance/audit requirement.
+
+**Tracked from session 2026-04-08** during the post-merge cleanup work — flagged when reviewing what raise-a-bull has vs. doesn't have for ops observability.
