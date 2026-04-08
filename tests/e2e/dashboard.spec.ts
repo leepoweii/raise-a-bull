@@ -127,10 +127,11 @@ test.describe('Settings Page', () => {
     await expect(input).toBeVisible();
     // Pick a distinctive sentinel value unlikely to collide with a real config
     await input.fill('31337');
+    const saveResponse1 = page.waitForResponse(
+      (resp) => resp.url().includes('/admin/api/settings') && resp.request().method() === 'PUT'
+    );
     await page.click('button:has-text("Save")');
-    // Alpine's save() awaits the PUT then sets saved=true — wait for the
-    // restart-notice to appear as the confirmation signal
-    await expect(page.locator('.restart-notice')).toBeVisible({ timeout: 5000 });
+    await saveResponse1;
     // Reload and re-navigate — value must still be 31337
     await page.reload();
     await page.click('a:has-text("Settings")');
