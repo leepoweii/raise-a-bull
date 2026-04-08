@@ -26,6 +26,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageCo
 
 import discord
 
+from raisebull.audit import AuditLog
 from raisebull.buffer import MessageBuffer
 from raisebull.runner import ClaudeRunner
 from raisebull.session import SessionStore
@@ -125,6 +126,7 @@ _sessions: SessionStore | None = None
 _runner: ClaudeRunner | None = None
 _message_buffer: MessageBuffer | None = None
 _heartbeat_push = None  # set in lifespan
+_audit_log: AuditLog | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +135,7 @@ _heartbeat_push = None  # set in lifespan
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _sessions, _runner, _message_buffer, _heartbeat_push
+    global _sessions, _runner, _message_buffer, _heartbeat_push, _audit_log
 
     if not os.getenv("LINE_CHANNEL_SECRET"):
         raise RuntimeError("LINE_CHANNEL_SECRET must be set")
@@ -142,6 +144,9 @@ async def lifespan(app: FastAPI):
 
     _sessions = SessionStore(db_path=os.getenv("DB_PATH", "/app/data/sessions.db"))
     await _sessions.init()
+
+    _audit_log = AuditLog(db_path=os.getenv("DB_PATH", "/app/data/sessions.db"))
+    await _audit_log.init()
 
     _message_buffer = MessageBuffer(db_path=os.getenv("DB_PATH", "/app/data/sessions.db"))
     await _message_buffer.init()
@@ -155,6 +160,7 @@ async def lifespan(app: FastAPI):
     # Inject runner + sessions into admin app (created at module level, populated here)
     _admin_app.state.runner = _runner
     _admin_app.state.sessions = _sessions
+    _admin_app.state.audit_log = _audit_log
 
     # Wire heartbeat → Discord push via the bot's channel cache
     async def heartbeat_push(channel_name: str, message: str) -> None:
@@ -188,6 +194,8 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    if _audit_log is not None:
+        await _audit_log.close()
     if _sessions is not None:
         await _sessions.close()
     if _message_buffer is not None:

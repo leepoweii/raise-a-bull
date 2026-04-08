@@ -15,6 +15,7 @@ def create_admin_app(
     bot_fn=None,
     runner=None,
     sessions=None,
+    audit_log=None,
 ) -> FastAPI:
     app = FastAPI(title="raise-a-bull Admin")
 
@@ -24,6 +25,7 @@ def create_admin_app(
     app.state.bot_fn = bot_fn
     app.state.runner = runner
     app.state.sessions = sessions
+    app.state.audit_log = audit_log
 
     init_credentials_db(app.state.db_path)
 
