@@ -73,72 +73,108 @@ def test_application_log_lines_propagate_to_root_caplog(caplog):
     assert "test marker xyz123" in caplog.text
 
 
+def _restore_default_log_config():
+    """Helper for the LOG_LEVEL parametrized tests below: re-runs the
+    extracted configure helper with no LOG_LEVEL env so we always end at
+    the INFO baseline. Avoids importlib.reload(raisebull.main) — reloading
+    the module would re-trigger create_admin_app() which mkdir's paths
+    that don't exist on macOS test machines.
+    """
+    import os as _os
+    from raisebull.main import _configure_application_logging
+    _os.environ.pop("LOG_LEVEL", None)
+    _configure_application_logging()
+
+
 def test_log_level_env_var_overrides_default():
     """LOG_LEVEL env var (default INFO) controls the raisebull logger level
     so privacy-sensitive deployments can suppress INFO chatter without
-    forking. Sets LOG_LEVEL=WARNING via patch.dict, re-imports main to
-    re-execute the module-level setLevel call, asserts the raisebull logger
-    is now at WARNING.
+    forking.
 
     Codex flagged the original hardcoded setLevel(INFO) as a regression for
     deployments with deliberate WARNING/ERROR policies — this env var
     closes that hole while keeping INFO as the friendly default.
+
+    Calls the extracted _configure_application_logging() helper directly
+    instead of importlib.reload(raisebull.main); reloading the module
+    would re-run create_admin_app() and error on macOS where /app/data
+    isn't writable.
     """
-    import importlib
+    from raisebull.main import _configure_application_logging
 
-    import raisebull.main
+    with patch.dict("os.environ", {"LOG_LEVEL": "WARNING"}):
+        _configure_application_logging()
 
-    # Override + reload to re-trigger the module-level basicConfig + setLevel
-    override_env = {**ENV, "LOG_LEVEL": "WARNING"}
-    with patch.dict("os.environ", override_env):
-        importlib.reload(raisebull.main)
-
-    raisebull_logger = logging.getLogger("raisebull")
-    heartbeat_logger = logging.getLogger("raisebull.heartbeat")
-    assert raisebull_logger.getEffectiveLevel() == logging.WARNING, (
-        f"LOG_LEVEL=WARNING should set raisebull to WARNING, got "
-        f"{raisebull_logger.getEffectiveLevel()}"
-    )
-    assert heartbeat_logger.getEffectiveLevel() == logging.WARNING
-
-    # Restore default INFO so other tests are unaffected (reload main with
-    # the original ENV — which has no LOG_LEVEL → defaults to INFO)
-    with patch.dict("os.environ", ENV):
-        importlib.reload(raisebull.main)
-    assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
+    try:
+        raisebull_logger = logging.getLogger("raisebull")
+        heartbeat_logger = logging.getLogger("raisebull.heartbeat")
+        assert raisebull_logger.getEffectiveLevel() == logging.WARNING
+        assert heartbeat_logger.getEffectiveLevel() == logging.WARNING
+    finally:
+        _restore_default_log_config()
+        assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
 
 
-def test_log_level_invalid_value_falls_back_to_info_without_crash(caplog):
-    """A typo in LOG_LEVEL (e.g. WARNNG) must NOT crash module import —
-    that would prevent the bot from booting on a bad .env value. Instead,
-    main.py validates against _VALID_LOG_LEVELS and falls back to INFO
-    while emitting a warning so operators can spot the typo in stdout.
+@pytest.mark.parametrize("level_name,expected_numeric", [
+    ("DEBUG", logging.DEBUG),
+    ("INFO", logging.INFO),
+    ("WARNING", logging.WARNING),
+    ("WARN", logging.WARN),       # Python alias for WARNING
+    ("ERROR", logging.ERROR),
+    ("CRITICAL", logging.CRITICAL),
+    ("FATAL", logging.FATAL),     # Python alias for CRITICAL
+])
+def test_log_level_accepts_python_logging_aliases(level_name, expected_numeric):
+    """LOG_LEVEL must accept every level name Python's logging module accepts —
+    including the WARN and FATAL aliases. Codex flagged that a hardcoded
+    {DEBUG, INFO, WARNING, ERROR, CRITICAL} allowlist would have been a
+    regression for any deployment already using LOG_LEVEL=WARN.
+
+    Fix uses logging.getLevelNamesMapping() (Python 3.11+) so the validation
+    set is always in sync with what basicConfig/setLevel would accept.
+    """
+    from raisebull.main import _configure_application_logging
+
+    with patch.dict("os.environ", {"LOG_LEVEL": level_name}):
+        _configure_application_logging()
+
+    try:
+        assert logging.getLogger("raisebull").getEffectiveLevel() == expected_numeric, (
+            f"LOG_LEVEL={level_name!r} should map to numeric {expected_numeric}, "
+            f"got {logging.getLogger('raisebull').getEffectiveLevel()}"
+        )
+    finally:
+        _restore_default_log_config()
+
+
+def test_log_level_invalid_value_falls_back_to_info_without_crash():
+    """A typo in LOG_LEVEL (e.g. WARNNG) must NOT crash — that would prevent
+    the bot from booting on a bad .env value. Instead, the configure helper
+    validates against logging.getLevelNamesMapping() and falls back to INFO
+    while RETURNING a warning message that the caller logs after the logger
+    is configured.
 
     Codex flagged the original implementation passing the raw LOG_LEVEL
     directly to basicConfig/setLevel, which would raise ValueError on a
     typo and crash the FastAPI startup.
     """
-    import importlib
+    from raisebull.main import _configure_application_logging
 
-    import raisebull.main
+    with patch.dict("os.environ", {"LOG_LEVEL": "WARNNG"}):  # deliberate typo
+        # MUST NOT raise — fallback path keeps the app bootable
+        fallback_msg = _configure_application_logging()
 
-    bad_env = {**ENV, "LOG_LEVEL": "WARNNG"}  # deliberate typo
-    with patch.dict("os.environ", bad_env):
-        with caplog.at_level(logging.WARNING, logger="raisebull.main"):
-            # MUST NOT raise — fallback path keeps the app bootable
-            importlib.reload(raisebull.main)
+    try:
+        # Fell back to INFO
+        assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
 
-    # Fell back to INFO
-    assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
-
-    # Operator-visible warning explaining the fallback
-    assert "WARNNG" in caplog.text
-    assert "not a valid Python logging level" in caplog.text
-    assert "defaulting to INFO" in caplog.text
-
-    # Restore default for other tests
-    with patch.dict("os.environ", ENV):
-        importlib.reload(raisebull.main)
+        # Returned a fallback message containing the bad value + the fix
+        assert fallback_msg is not None, "expected a fallback warning message"
+        assert "WARNNG" in fallback_msg
+        assert "not a recognized Python logging level" in fallback_msg
+        assert "defaulting to INFO" in fallback_msg
+    finally:
+        _restore_default_log_config()
 
 
 @pytest.mark.asyncio

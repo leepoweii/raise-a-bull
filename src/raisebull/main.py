@@ -64,27 +64,54 @@ load_dotenv()
 #
 # uvicorn's own loggers set propagate=False so we don't get double-logging
 # on uvicorn lines.
-_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
-_RAW_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
-if _RAW_LOG_LEVEL in _VALID_LOG_LEVELS:
-    _LOG_LEVEL = _RAW_LOG_LEVEL
-    _log_level_fallback_msg: str | None = None
-else:
-    # A typo in .env (e.g. LOG_LEVEL=WARNNG) would otherwise raise ValueError
-    # in basicConfig/setLevel at module import → bot can't boot. Fall back to
-    # INFO and emit a warning AFTER the logger is configured, so operators
-    # can spot the bad value in stdout / docker logs without losing the bot.
-    _LOG_LEVEL = "INFO"
-    _log_level_fallback_msg = (
-        f"LOG_LEVEL={_RAW_LOG_LEVEL!r} is not a valid Python logging level "
-        f"(expected one of {sorted(_VALID_LOG_LEVELS)}); defaulting to INFO"
-    )
+def _configure_application_logging() -> str | None:
+    """Configure root + raisebull logger from LOG_LEVEL env var.
 
-logging.basicConfig(
-    level=_LOG_LEVEL,
-    format="%(levelname)-8s %(name)s: %(message)s",
-)
-logging.getLogger("raisebull").setLevel(_LOG_LEVEL)
+    Returns a fallback warning message string if LOG_LEVEL was invalid (so
+    the caller can log it AFTER the logger is configured), or None if the
+    value was valid.
+
+    Two-step setup for robustness:
+      1. basicConfig adds a StreamHandler to root if root has no handlers
+         (production uvicorn). Idempotent: no-op when root already has
+         handlers (pytest with log-capture installed).
+      2. Explicit setLevel on the raisebull logger so all raisebull.*
+         descendants emit at the configured level regardless of what
+         configured root.
+
+    LOG_LEVEL is validated against `logging.getLevelNamesMapping()` (Python
+    3.11+) so we accept exactly what `logging.basicConfig` would accept,
+    including the `WARN` and `FATAL` aliases. Invalid values fall back to
+    INFO + emit a warning, so a typo (e.g. LOG_LEVEL=WARNNG) does NOT crash
+    module import — the bot stays bootable on a bad .env value.
+    """
+    valid_levels = set(logging.getLevelNamesMapping().keys())
+    raw = os.environ.get("LOG_LEVEL", "INFO").upper()
+    if raw in valid_levels:
+        level = raw
+        fallback_msg = None
+    else:
+        level = "INFO"
+        fallback_msg = (
+            f"LOG_LEVEL={raw!r} is not a recognized Python logging level name "
+            f"(valid: {sorted(valid_levels)}); defaulting to INFO"
+        )
+
+    logging.basicConfig(
+        level=level,
+        format="%(levelname)-8s %(name)s: %(message)s",
+    )
+    logging.getLogger("raisebull").setLevel(level)
+    return fallback_msg
+
+
+# Configure application logging at module load so logger.info() calls from
+# raisebull.heartbeat, raisebull.discord_bot, raisebull.session, etc. surface
+# in uvicorn stdout / docker logs. Without this, Python's root logger defaults
+# to WARNING and uvicorn only configures its own loggers — application INFO
+# lines like "Nightly compact: no eligible sessions (threshold=50000)" are
+# silently dropped, leaving operators blind to scheduled job behavior.
+_log_level_fallback_msg = _configure_application_logging()
 
 logger = logging.getLogger(__name__)
 if _log_level_fallback_msg:
