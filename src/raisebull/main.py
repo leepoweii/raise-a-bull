@@ -64,7 +64,22 @@ load_dotenv()
 #
 # uvicorn's own loggers set propagate=False so we don't get double-logging
 # on uvicorn lines.
-_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+_VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+_RAW_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+if _RAW_LOG_LEVEL in _VALID_LOG_LEVELS:
+    _LOG_LEVEL = _RAW_LOG_LEVEL
+    _log_level_fallback_msg: str | None = None
+else:
+    # A typo in .env (e.g. LOG_LEVEL=WARNNG) would otherwise raise ValueError
+    # in basicConfig/setLevel at module import → bot can't boot. Fall back to
+    # INFO and emit a warning AFTER the logger is configured, so operators
+    # can spot the bad value in stdout / docker logs without losing the bot.
+    _LOG_LEVEL = "INFO"
+    _log_level_fallback_msg = (
+        f"LOG_LEVEL={_RAW_LOG_LEVEL!r} is not a valid Python logging level "
+        f"(expected one of {sorted(_VALID_LOG_LEVELS)}); defaulting to INFO"
+    )
+
 logging.basicConfig(
     level=_LOG_LEVEL,
     format="%(levelname)-8s %(name)s: %(message)s",
@@ -72,6 +87,8 @@ logging.basicConfig(
 logging.getLogger("raisebull").setLevel(_LOG_LEVEL)
 
 logger = logging.getLogger(__name__)
+if _log_level_fallback_msg:
+    logger.warning(_log_level_fallback_msg)
 
 # ---------------------------------------------------------------------------
 # Global singletons (populated in lifespan)

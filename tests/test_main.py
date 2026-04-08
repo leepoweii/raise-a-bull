@@ -108,6 +108,39 @@ def test_log_level_env_var_overrides_default():
     assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
 
 
+def test_log_level_invalid_value_falls_back_to_info_without_crash(caplog):
+    """A typo in LOG_LEVEL (e.g. WARNNG) must NOT crash module import —
+    that would prevent the bot from booting on a bad .env value. Instead,
+    main.py validates against _VALID_LOG_LEVELS and falls back to INFO
+    while emitting a warning so operators can spot the typo in stdout.
+
+    Codex flagged the original implementation passing the raw LOG_LEVEL
+    directly to basicConfig/setLevel, which would raise ValueError on a
+    typo and crash the FastAPI startup.
+    """
+    import importlib
+
+    import raisebull.main
+
+    bad_env = {**ENV, "LOG_LEVEL": "WARNNG"}  # deliberate typo
+    with patch.dict("os.environ", bad_env):
+        with caplog.at_level(logging.WARNING, logger="raisebull.main"):
+            # MUST NOT raise — fallback path keeps the app bootable
+            importlib.reload(raisebull.main)
+
+    # Fell back to INFO
+    assert logging.getLogger("raisebull").getEffectiveLevel() == logging.INFO
+
+    # Operator-visible warning explaining the fallback
+    assert "WARNNG" in caplog.text
+    assert "not a valid Python logging level" in caplog.text
+    assert "defaulting to INFO" in caplog.text
+
+    # Restore default for other tests
+    with patch.dict("os.environ", ENV):
+        importlib.reload(raisebull.main)
+
+
 @pytest.mark.asyncio
 async def test_health_check():
     with patch.dict("os.environ", ENV):
