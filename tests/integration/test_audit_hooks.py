@@ -85,3 +85,81 @@ class TestLoginHooks:
                     assert unique_pw not in value, (
                         f"Password leaked into audit field: {value}"
                     )
+
+
+class TestSettingsHook:
+    @pytest.mark.asyncio
+    async def test_settings_put_logs_only_changed_keys(self, client, audit_log):
+        await _login(client)
+        # Clear the login.success audit row so we only check settings rows
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        # First PUT: establish a known baseline
+        await client.put(
+            "/admin/api/settings",
+            json={"agent_name": "Bull", "max_steps": "100"},
+        )
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        # Second PUT: change 2 keys, leave 1 same
+        resp = await client.put(
+            "/admin/api/settings",
+            json={
+                "agent_name": "Bull",            # same
+                "max_steps": "200",              # changed
+                "nightly_compact_threshold": "9999",  # changed (from default 50000)
+            },
+        )
+        assert resp.status_code == 200
+
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 2
+        targets = {r["target"] for r in rows}
+        assert targets == {"max_steps", "nightly_compact_threshold"}
+        for row in rows:
+            assert row["action"] == "settings.put"
+            assert row["actor"] == "admin"
+            if row["target"] == "max_steps":
+                assert row["before_val"] == "100"
+                assert row["after_val"] == "200"
+
+    @pytest.mark.asyncio
+    async def test_settings_put_no_change_no_audit(self, client, audit_log):
+        await _login(client)
+        # Establish baseline
+        await client.put(
+            "/admin/api/settings",
+            json={"agent_name": "Bull"},
+        )
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        # PUT same value
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"agent_name": "Bull"},
+        )
+        assert resp.status_code == 200
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 0
+
+    @pytest.mark.asyncio
+    async def test_settings_put_validation_fail_no_audit(self, client, audit_log):
+        await _login(client)
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        # Invalid: nightly_compact_threshold must be positive
+        resp = await client.put(
+            "/admin/api/settings",
+            json={"nightly_compact_threshold": "0"},
+        )
+        assert resp.status_code == 400
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 0

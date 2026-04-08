@@ -112,24 +112,39 @@ async def put_settings(request: Request):
 
     # Validate every numeric setting present in the body. The first invalid key
     # wins (deterministic order via _NUMERIC_CONSTRAINTS dict iteration).
-    # Without validation, garbage values would persist via PUT and be displayed
-    # by GET, while runtime consumers (nightly_compact, heartbeat scheduler,
-    # message buffer, etc.) silently fall back to their defaults — causing
-    # dashboard ↔ runtime divergence. The canonical "{key} must be {description}"
-    # message format lets clients parse one structure across all numeric keys.
     for key in _NUMERIC_CONSTRAINTS:
         if key in body:
             err = _validate_numeric_setting(key, body[key])
             if err:
                 return JSONResponse({"error": err}, status_code=400)
 
+    audit_log = getattr(request.app.state, "audit_log", None)
+    source_ip = request.client.host if request.client else None
+
     path = _settings_path(request)
     current = _read_settings(path)
+    changes: list[tuple[str, str, str]] = []  # (key, before, after)
     for key in _ALLOWED_KEYS:
         if key in body:
-            current[key] = str(body[key])
+            new_val = str(body[key])
+            old_val = current[key]
+            if new_val != old_val:
+                changes.append((key, old_val, new_val))
+            current[key] = new_val
+
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
     os.replace(str(tmp), str(path))
+
+    if audit_log is not None and changes:
+        for key, before, after in changes:
+            await audit_log.record(
+                "settings.put",
+                actor="admin",
+                target=key,
+                before_val=before,
+                after_val=after,
+                source_ip=source_ip,
+            )
     return {"ok": True}
