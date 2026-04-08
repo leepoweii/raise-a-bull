@@ -320,13 +320,29 @@ async def send_message(session_id: str, request: Request):
 
 @router.get("/api/chat/{session_key}/history")
 async def get_history(session_key: str, request: Request):
-    """Return conversation history by reading Claude Code's .jsonl file."""
+    """Return conversation history by reading Claude Code's .jsonl file.
+
+    A session has three possible states:
+      1. Exists in SQLite (via `sessions_store.get`) — has a claude_session_id,
+         so a .jsonl file may or may not exist on disk. Return parsed messages
+         (or [] if the .jsonl is missing).
+      2. Exists only in the in-memory `_web_sessions` dict — a freshly-created
+         session that has not yet sent its first message (the SQLite row is
+         written inside the send_message SSE stream). Return [] — there are
+         no messages yet, but the session is legitimate and the dashboard
+         should not show a "session not found" toast.
+      3. Exists in neither — a genuinely unknown key. Return 404.
+    """
     sessions_store = getattr(request.app.state, "sessions", None)
     if not sessions_store:
         return JSONResponse({"error": "no sessions store"}, status_code=503)
 
     row = await sessions_store.get(session_key)
     if not row:
+        # State 2: fresh in-memory session with no messages yet → empty history.
+        # State 3: totally unknown → 404.
+        if session_key in _web_sessions:
+            return []
         return JSONResponse({"error": "session not found"}, status_code=404)
 
     claude_session_id = row["session_id"]

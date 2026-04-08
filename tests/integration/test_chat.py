@@ -290,3 +290,64 @@ class TestChatFileUpload:
         events = [json.loads(line[6:]) for line in resp.text.split("\n") if line.startswith("data: ")]
         types = [e["type"] for e in events]
         assert "done" in types
+
+
+class TestChatHistory:
+    """Regression tests for GET /api/chat/{id}/history.
+
+    Bug 2026-04-08 (found by manual test on feat/audit-logs):
+    Freshly-created web sessions live only in _web_sessions (in memory)
+    until the first message is sent. The SQLite row is written inside
+    send_message's SSE stream via sessions_store.save(). Before then,
+    the Dashboard's '+ NEW CHAT' button creates a session, navigates to
+    it, and immediately calls GET /api/chat/{id}/history — which returned
+    404 "session not found" because the DB row didn't exist yet. That
+    surfaced as a red toast in the UI on every new chat.
+
+    Fix: a session that exists in _web_sessions but not in the DB is a
+    valid, just-created session with zero history. Return [] instead of
+    404 in that case. A session that exists in neither is still 404.
+    """
+
+    @pytest.mark.asyncio
+    async def test_history_for_fresh_session_returns_empty_list(self, client):
+        """+ NEW CHAT → GET history before any messages sent → [] not 404."""
+        create_resp = await client.post("/admin/api/chat/sessions")
+        assert create_resp.status_code == 200
+        sid = create_resp.json()["id"]
+
+        # Immediately ask for history — mirrors what the dashboard does
+        # when the user clicks '+ New Chat' and the UI navigates into the
+        # new session.
+        resp = await client.get(f"/admin/api/chat/{sid}/history")
+        assert resp.status_code == 200, (
+            f"Fresh web session should return empty history, got "
+            f"{resp.status_code}: {resp.text}"
+        )
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_history_for_truly_nonexistent_session_returns_404(self, client):
+        """Genuinely unknown session id (neither in memory nor in DB) → 404.
+
+        Guards against the fix over-correcting into a blanket 200+[].
+        """
+        resp = await client.get("/admin/api/chat/web:does-not-exist/history")
+        assert resp.status_code == 404
+        assert resp.json() == {"error": "session not found"}
+
+    @pytest.mark.asyncio
+    async def test_history_for_fresh_session_unaffected_by_other_sessions(
+        self, client
+    ):
+        """Creating multiple sessions doesn't cross-pollute history."""
+        sid_a = (await client.post("/admin/api/chat/sessions")).json()["id"]
+        sid_b = (await client.post("/admin/api/chat/sessions")).json()["id"]
+        assert sid_a != sid_b
+
+        resp_a = await client.get(f"/admin/api/chat/{sid_a}/history")
+        resp_b = await client.get(f"/admin/api/chat/{sid_b}/history")
+        assert resp_a.status_code == 200
+        assert resp_b.status_code == 200
+        assert resp_a.json() == []
+        assert resp_b.json() == []
