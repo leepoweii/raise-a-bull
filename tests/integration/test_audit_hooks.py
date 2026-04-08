@@ -346,3 +346,187 @@ class TestInternalHooks:
 
 async def _noop_coro():
     return None
+
+
+class TestCredentialsHooks:
+    """Audit hooks for POST/PUT/DELETE /api/credentials.
+
+    Security invariant: the raw key_value must NEVER appear in any audit
+    field. We test this with a unique sentinel string that we grep for
+    after each mutation.
+    """
+
+    @pytest.mark.asyncio
+    async def test_credentials_create_recorded_with_redacted_value(
+        self, client, audit_log
+    ):
+        await _login(client)
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.post(
+            "/admin/api/credentials",
+            json={
+                "key_name": "ANTHROPIC_API_KEY",
+                "key_value": "sk-ant-api03-abcdefghijklmnop",
+                "service": "anthropic",
+            },
+        )
+        assert resp.status_code == 200
+
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["action"] == "credentials.create"
+        assert row["actor"] == "admin"
+        assert row["target"] == "ANTHROPIC_API_KEY"
+        assert row["before_val"] is None
+        assert row["after_val"] == "***mnop"  # last 4 chars only
+        assert row["source_ip"] is not None
+
+    @pytest.mark.asyncio
+    async def test_credentials_put_key_value_recorded(self, client, audit_log):
+        await _login(client)
+        # Seed a credential first
+        create_resp = await client.post(
+            "/admin/api/credentials",
+            json={"key_name": "SERPER_API_KEY", "key_value": "old-value-1234", "service": "serper"},
+        )
+        cred_id = create_resp.json()["id"]
+
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.put(
+            f"/admin/api/credentials/{cred_id}",
+            json={"key_value": "new-value-WXYZ"},
+        )
+        assert resp.status_code == 200
+
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["action"] == "credentials.put"
+        assert row["target"] == "SERPER_API_KEY"  # NOT cred_id — the human-readable name
+        assert row["before_val"] is None
+        assert row["after_val"] == "***WXYZ"
+
+    @pytest.mark.asyncio
+    async def test_credentials_put_service_only_no_value_in_audit(
+        self, client, audit_log
+    ):
+        """Updating only the 'service' field (not key_value) should still
+        record the event but with after_val=NULL since no secret changed."""
+        await _login(client)
+        create_resp = await client.post(
+            "/admin/api/credentials",
+            json={"key_name": "JINA_API_KEY", "key_value": "unchanged", "service": "old-svc"},
+        )
+        cred_id = create_resp.json()["id"]
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.put(
+            f"/admin/api/credentials/{cred_id}",
+            json={"service": "new-svc"},
+        )
+        assert resp.status_code == 200
+
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["action"] == "credentials.put"
+        assert rows[0]["target"] == "JINA_API_KEY"
+        assert rows[0]["after_val"] is None  # no secret change
+
+    @pytest.mark.asyncio
+    async def test_credentials_delete_recorded(self, client, audit_log):
+        await _login(client)
+        create_resp = await client.post(
+            "/admin/api/credentials",
+            json={"key_name": "DOOMED_KEY", "key_value": "bye-bye", "service": ""},
+        )
+        cred_id = create_resp.json()["id"]
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.delete(f"/admin/api/credentials/{cred_id}")
+        assert resp.status_code == 200
+
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["action"] == "credentials.delete"
+        assert row["target"] == "DOOMED_KEY"
+        assert row["before_val"] is None
+        assert row["after_val"] is None
+
+    @pytest.mark.asyncio
+    async def test_credentials_put_404_no_audit(self, client, audit_log):
+        """Updating a nonexistent cred returns 404 and produces zero audit rows."""
+        await _login(client)
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.put(
+            "/admin/api/credentials/99999",
+            json={"key_value": "new"},
+        )
+        assert resp.status_code == 404
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 0
+
+    @pytest.mark.asyncio
+    async def test_credentials_delete_404_no_audit(self, client, audit_log):
+        """Deleting a nonexistent cred returns 404 and produces zero audit rows."""
+        await _login(client)
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.delete("/admin/api/credentials/99999")
+        assert resp.status_code == 404
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 0
+
+    @pytest.mark.asyncio
+    async def test_credentials_mutations_never_log_full_value(
+        self, client, audit_log
+    ):
+        """Regression guard — scans EVERY audit field for the unique sentinel
+        value. If the full value leaks anywhere, this test fails loudly.
+        """
+        sentinel = "SENTINEL_VALUE_XYZ_MUST_NEVER_APPEAR_IN_AUDIT_abcdef"
+        await _login(client)
+        # Create
+        create_resp = await client.post(
+            "/admin/api/credentials",
+            json={"key_name": "LEAK_TEST", "key_value": sentinel, "service": "test"},
+        )
+        cred_id = create_resp.json()["id"]
+        # Update to a different full value
+        await client.put(
+            f"/admin/api/credentials/{cred_id}",
+            json={"key_value": sentinel + "_UPDATED"},
+        )
+        # Delete
+        await client.delete(f"/admin/api/credentials/{cred_id}")
+
+        rows = await audit_log.list_recent(limit=10)
+        for row in rows:
+            for value in row.values():
+                if isinstance(value, str):
+                    assert sentinel not in value, (
+                        f"Credential sentinel leaked into audit field: "
+                        f"action={row['action']} field_value={value!r}"
+                    )
+
+        # Also verify target field contains the human-readable key_name, not any derived value
+        cred_rows = [r for r in rows if r["action"].startswith("credentials.")]
+        assert all(row["target"] == "LEAK_TEST" for row in cred_rows), (
+            f"Expected target='LEAK_TEST' in all credentials rows, got: {[row['target'] for row in cred_rows]}"
+        )

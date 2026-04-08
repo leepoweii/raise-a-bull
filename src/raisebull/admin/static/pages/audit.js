@@ -10,7 +10,7 @@ window.auditPage = function() {
 
         categories: [
             { name: 'Auth',      actions: ['login.success', 'login.fail'] },
-            { name: 'Dashboard', actions: ['settings.put', 'session.delete'] },
+            { name: 'Dashboard', actions: ['settings.put', 'session.delete', 'credentials.create', 'credentials.put', 'credentials.delete'] },
             { name: 'Internal',  actions: ['internal.heartbeat', 'internal.nightly_compact', 'internal.discord_push'] },
             { name: 'Scheduler', actions: ['scheduler.heartbeat', 'scheduler.nightly_compact', 'scheduler.discord_push'] },
             { name: 'LINE',      actions: ['line.signature_fail'] },
@@ -18,7 +18,7 @@ window.auditPage = function() {
 
         selectedActions: new Set([
             'login.success', 'login.fail',
-            'settings.put', 'session.delete',
+            'settings.put', 'session.delete', 'credentials.create', 'credentials.put', 'credentials.delete',
             'internal.heartbeat', 'internal.nightly_compact', 'internal.discord_push',
             'scheduler.heartbeat', 'scheduler.nightly_compact', 'scheduler.discord_push',
             'line.signature_fail',
