@@ -277,6 +277,14 @@ def _require_localhost(request: Request) -> None:
 async def discord_push(req: DiscordPushRequest, request: Request) -> dict[str, Any]:
     """Push a message to a Discord channel via the running bot. Localhost only."""
     _require_localhost(request)
+    if _audit_log is not None:
+        await _audit_log.record(
+            "internal.discord_push",
+            actor="system",
+            target=req.channel_id,
+            after_val=req.message[:200],
+            source_ip=request.client.host if request.client else None,
+        )
     bot = get_bot()
     if bot is None:
         raise HTTPException(status_code=503, detail="Discord bot not running")
@@ -332,6 +340,12 @@ async def webhook_line(request: Request) -> Response:
 async def heartbeat_trigger(request: Request) -> dict[str, Any]:
     """Manually trigger one heartbeat tick (for testing). Localhost only."""
     _require_localhost(request)
+    if _audit_log is not None:
+        await _audit_log.record(
+            "internal.heartbeat",
+            actor="system",
+            source_ip=request.client.host if request.client else None,
+        )
     asyncio.create_task(run_event_check(_runner, _sessions, push_fn=_heartbeat_push))
     return {"ok": True, "message": "heartbeat tick started"}
 
@@ -340,5 +354,11 @@ async def heartbeat_trigger(request: Request) -> dict[str, Any]:
 async def nightly_compact_trigger(request: Request) -> dict[str, Any]:
     """Manually trigger nightly compact (for testing). Localhost only."""
     _require_localhost(request)
+    if _audit_log is not None:
+        await _audit_log.record(
+            "internal.nightly_compact",
+            actor="system",
+            source_ip=request.client.host if request.client else None,
+        )
     asyncio.create_task(nightly_compact(_runner, _sessions, buffer=_message_buffer))
     return {"ok": True, "message": "nightly compact started"}

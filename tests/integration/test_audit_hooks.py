@@ -199,3 +199,146 @@ class TestSessionDeleteHook:
         assert resp.status_code == 404
         rows = await audit_log.list_recent(limit=10)
         assert len(rows) == 0
+
+
+class TestInternalHooks:
+    """Tests against the full main app (not just the admin sub-app).
+
+    /internal/* routes live on the top-level FastAPI app in main.py and
+    use the module-level _audit_log global (not request.app.state).
+    """
+
+    @pytest.mark.asyncio
+    async def test_internal_heartbeat_trigger_recorded(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+
+        import raisebull.main as main
+        from raisebull.audit import AuditLog
+
+        al = AuditLog(":memory:")
+        await al.init()
+        monkeypatch.setattr(main, "_audit_log", al)
+        # Stub out the background work so the test doesn't actually tick
+        monkeypatch.setattr(
+            main, "run_event_check",
+            lambda *a, **kw: _noop_coro(),
+        )
+
+        transport = ASGITransport(app=main.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post("/internal/heartbeat/trigger")
+            assert resp.status_code == 200
+
+        rows = await al.list_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["action"] == "internal.heartbeat"
+        assert rows[0]["actor"] == "system"
+        assert rows[0]["source_ip"] is not None
+        await al.close()
+
+    @pytest.mark.asyncio
+    async def test_internal_nightly_compact_trigger_recorded(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+
+        import raisebull.main as main
+        from raisebull.audit import AuditLog
+
+        al = AuditLog(":memory:")
+        await al.init()
+        monkeypatch.setattr(main, "_audit_log", al)
+        monkeypatch.setattr(
+            main, "nightly_compact",
+            lambda *a, **kw: _noop_coro(),
+        )
+
+        transport = ASGITransport(app=main.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post("/internal/nightly-compact/trigger")
+            assert resp.status_code == 200
+
+        rows = await al.list_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["action"] == "internal.nightly_compact"
+        assert rows[0]["actor"] == "system"
+        await al.close()
+
+    @pytest.mark.asyncio
+    async def test_internal_discord_push_recorded(self, monkeypatch):
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+
+        import raisebull.main as main
+        from raisebull.audit import AuditLog
+
+        al = AuditLog(":memory:")
+        await al.init()
+        monkeypatch.setattr(main, "_audit_log", al)
+
+        # Fake bot + channel to avoid real Discord calls
+        class _FakeChannel:
+            async def send(self, msg):
+                return None
+
+        class _FakeBot:
+            def get_channel(self, cid):
+                return _FakeChannel()
+
+        monkeypatch.setattr(main, "get_bot", lambda: _FakeBot())
+
+        transport = ASGITransport(app=main.app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post(
+                "/internal/discord/push",
+                json={"channel_id": "12345", "message": "hello audit"},
+            )
+            assert resp.status_code == 200
+
+        rows = await al.list_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["action"] == "internal.discord_push"
+        assert rows[0]["actor"] == "system"
+        assert rows[0]["target"] == "12345"
+        assert rows[0]["after_val"] == "hello audit"
+        await al.close()
+
+
+    @pytest.mark.asyncio
+    async def test_internal_localhost_rejection_no_audit(self, monkeypatch):
+        """Non-loopback callers get 403 and produce zero audit rows.
+
+        The 403 rejection fires inside _require_localhost BEFORE the
+        audit record call, so failed triggers must not leave a trail.
+        """
+        monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
+        monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+
+        import raisebull.main as main
+        from raisebull.audit import AuditLog
+
+        al = AuditLog(":memory:")
+        await al.init()
+        monkeypatch.setattr(main, "_audit_log", al)
+
+        # Wrap main.app in a thin ASGI middleware that rewrites scope["client"]
+        # to a non-loopback IP before delegating. This is the standard way to
+        # simulate an external caller in ASGITransport-based tests.
+        async def _external_ip_app(scope, receive, send):
+            if scope["type"] == "http":
+                scope = dict(scope)
+                scope["client"] = ("203.0.113.5", 54321)
+            await main.app(scope, receive, send)
+
+        transport = ASGITransport(app=_external_ip_app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            resp = await c.post("/internal/heartbeat/trigger")
+            assert resp.status_code == 403
+
+        rows = await al.list_recent(limit=10)
+        assert len(rows) == 0
+        await al.close()
+
+
+async def _noop_coro():
+    return None
