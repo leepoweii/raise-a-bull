@@ -163,3 +163,39 @@ class TestSettingsHook:
         assert resp.status_code == 400
         rows = await audit_log.list_recent(limit=10)
         assert len(rows) == 0
+
+
+class TestSessionDeleteHook:
+    @pytest.mark.asyncio
+    async def test_session_delete_recorded(self, client, audit_log, admin_app):
+        await _login(client)
+        # Seed an in-memory session via the chat module internals
+        from raisebull.admin.routes_chat import _web_sessions
+        _web_sessions["web:testdelete"] = {
+            "created_at": "2026-04-08T00:00:00+00:00",
+            "message_count": 0,
+            "name": None,
+        }
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.delete("/admin/api/chat/web:testdelete")
+        assert resp.status_code == 200
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 1
+        assert rows[0]["action"] == "session.delete"
+        assert rows[0]["actor"] == "admin"
+        assert rows[0]["target"] == "web:testdelete"
+
+    @pytest.mark.asyncio
+    async def test_session_delete_404_no_audit(self, client, audit_log):
+        await _login(client)
+        db = audit_log._require_db()
+        await db.execute("DELETE FROM audit_log")
+        await db.commit()
+
+        resp = await client.delete("/admin/api/chat/web:does-not-exist")
+        assert resp.status_code == 404
+        rows = await audit_log.list_recent(limit=10)
+        assert len(rows) == 0

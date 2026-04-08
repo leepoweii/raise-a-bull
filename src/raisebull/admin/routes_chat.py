@@ -134,6 +134,15 @@ async def delete_session(session_id: str, request: Request):
         if os.path.isdir(uploads_dir):
             shutil.rmtree(uploads_dir, ignore_errors=True)
 
+    audit_log = getattr(request.app.state, "audit_log", None)
+    if audit_log is not None:
+        await audit_log.record(
+            "session.delete",
+            actor="admin",
+            target=session_id,
+            source_ip=request.client.host if request.client else None,
+        )
+
     return {"ok": True}
 
 
