@@ -212,6 +212,7 @@ class TestInternalHooks:
     async def test_internal_heartbeat_trigger_recorded(self, monkeypatch, tmp_path):
         monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
         import raisebull.main as main
         from raisebull.audit import AuditLog
@@ -238,9 +239,10 @@ class TestInternalHooks:
         await al.close()
 
     @pytest.mark.asyncio
-    async def test_internal_nightly_compact_trigger_recorded(self, monkeypatch):
+    async def test_internal_nightly_compact_trigger_recorded(self, monkeypatch, tmp_path):
         monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
         import raisebull.main as main
         from raisebull.audit import AuditLog
@@ -265,9 +267,10 @@ class TestInternalHooks:
         await al.close()
 
     @pytest.mark.asyncio
-    async def test_internal_discord_push_recorded(self, monkeypatch):
+    async def test_internal_discord_push_recorded(self, monkeypatch, tmp_path):
         monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
         import raisebull.main as main
         from raisebull.audit import AuditLog
@@ -305,7 +308,7 @@ class TestInternalHooks:
 
 
     @pytest.mark.asyncio
-    async def test_internal_localhost_rejection_no_audit(self, monkeypatch):
+    async def test_internal_localhost_rejection_no_audit(self, monkeypatch, tmp_path):
         """Non-loopback callers get 403 and produce zero audit rows.
 
         The 403 rejection fires inside _require_localhost BEFORE the
@@ -313,6 +316,7 @@ class TestInternalHooks:
         """
         monkeypatch.setenv("LINE_CHANNEL_SECRET", "x")
         monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "x")
+        monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
         import raisebull.main as main
         from raisebull.audit import AuditLog

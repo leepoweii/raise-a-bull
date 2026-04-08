@@ -28,13 +28,13 @@ test.describe('Audit Log page', () => {
     // Use toBeVisible on a specific row rather than toHaveCount(1) — the audit
     // log may already contain heartbeat / settings entries from prior runs, so
     // asserting exactly 1 row would be nondeterministic.
-    await expect(page.locator('table tbody tr:has-text("login.success")')).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('table tbody tr:has-text("login.success")').first()).toBeVisible({ timeout: 5000 });
   });
 
   test('category filter narrows results', async ({ page }) => {
     await login(page);
     await page.click('a:has-text("Audit")');
-    await expect(page.locator('table tbody tr')).toContainText('login.success');
+    await expect(page.locator('table tbody tr:has-text("login.success")').first()).toBeVisible({ timeout: 5000 });
 
     // Uncheck the Auth → login.success checkbox
     await page.uncheck('input[type="checkbox"][value="login.success"]');
