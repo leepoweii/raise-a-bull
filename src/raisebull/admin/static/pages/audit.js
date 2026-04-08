@@ -37,8 +37,8 @@ window.auditPage = function() {
             this.loading = true;
             this.error = null;
             try {
-                const from = `${this.fromDate}T00:00:00Z`;
-                const to = `${this.toDate}T23:59:59Z`;
+                const from = `${this.fromDate}T00:00:00+00:00`;
+                const to = `${this.toDate}T23:59:59+00:00`;
                 const data = await this.getApp().api(
                     `/api/audit?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&limit=500`
                 );

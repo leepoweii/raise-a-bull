@@ -8,19 +8,6 @@ _DEFAULT_LIMIT = 500
 _MAX_LIMIT = 2000
 
 
-def _normalize_iso(ts: str | None) -> str | None:
-    """Normalize JavaScript-style 'Z' suffix to Python-style '+00:00'.
-
-    Frontend sends 'YYYY-MM-DDTHH:MM:SSZ' (from Date.toISOString), backend
-    stores 'YYYY-MM-DDTHH:MM:SS.ffffff+00:00' (from datetime.isoformat).
-    Both represent UTC but sort differently as TEXT. Normalize at the API
-    boundary so the SQLite TEXT comparison is correct.
-    """
-    if ts and ts.endswith("Z"):
-        return ts[:-1] + "+00:00"
-    return ts
-
-
 @router.get("")
 async def list_audit(request: Request):
     audit_log = getattr(request.app.state, "audit_log", None)
@@ -47,8 +34,8 @@ async def list_audit(request: Request):
 
     # Fetch limit + 1 to detect truncation without a separate COUNT query
     rows = await audit_log.list_recent(
-        from_ts=_normalize_iso(from_ts),
-        to_ts=_normalize_iso(to_ts),
+        from_ts=from_ts,
+        to_ts=to_ts,
         limit=limit + 1,
     )
     truncated = len(rows) > limit

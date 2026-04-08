@@ -130,28 +130,3 @@ class TestAuditAPI:
         assert len(data["rows"]) == 500
         assert data["truncated"] is True
 
-    @pytest.mark.asyncio
-    async def test_list_audit_accepts_z_suffix(self, client, audit_log):
-        """Frontend sends Z suffix; backend must normalize to +00:00."""
-        await _login(client)
-        db = audit_log._require_db()
-        await db.execute("DELETE FROM audit_log")
-        # Seed a row stored with +00:00
-        await db.execute(
-            "INSERT INTO audit_log (ts, actor, action) VALUES (?, ?, ?)",
-            ("2026-04-05T12:00:00+00:00", "system", "test.marker"),
-        )
-        await db.commit()
-
-        # Query with Z suffix (what the dashboard sends)
-        resp = await client.get(
-            "/admin/api/audit",
-            params={
-                "from": "2026-04-04T00:00:00Z",
-                "to": "2026-04-07T00:00:00Z",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data["rows"]) == 1
-        assert data["rows"][0]["action"] == "test.marker"
