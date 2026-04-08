@@ -312,6 +312,12 @@ async def webhook_line(request: Request) -> Response:
     try:
         events = parser.parse(body_text, signature)
     except InvalidSignatureError:
+        if _audit_log is not None:
+            await _audit_log.record(
+                "line.signature_fail",
+                actor="unknown",
+                source_ip=request.client.host if request.client else None,
+            )
         raise HTTPException(status_code=400, detail="Invalid signature")
 
     async def _process() -> None:
