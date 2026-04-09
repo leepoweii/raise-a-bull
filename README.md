@@ -33,8 +33,9 @@ Each bot instance is a **workspace** — a directory with an identity, memory, a
 - **Image vision** — Gemini Flash describes images (receipts, documents, photos) in Chinese; QR codes auto-decoded including Taiwan e-invoices
 - **Dashboard** — Admin panel with status, context editor, skills editor, heartbeat viewer, credentials, permissions, and web chat (Alpine.js SPA, neo-brutalism CSS)
 - **MCP Search** — Web search (Google SERP via Serper) + full page reading (Jina Reader), auto-configured when API keys are set
-- **Heartbeat** — Scheduled tasks via APScheduler + user-editable `heartbeat.md`
+- **Heartbeat** — Scheduled tasks via APScheduler + user-editable `heartbeat.md` (default 60 min interval)
 - **Memory** — SQLite session store + per-member memory files + daily digests
+- **Token logging** — Per-call LLM token usage logged at INFO level (`LLM call: source=... input=N output=N total=N`) for cost tracking and observability
 - **Skills** — 11 prebuilt skills (calendar, document draft, weather, image generation, IG design, etc.) + extensible with custom skills
 - **Identity** — Layered identity system (managed templates + local customization → compiled IDENTITY.md)
 
@@ -173,6 +174,7 @@ Access at `http://localhost:{BOT_PORT}/admin/` (password set via `ADMIN_PASSWORD
 | `CLAUDE_MODEL` | optional | Model name (default: `claude-sonnet-4-6`) |
 | `NIGHTLY_COMPACT_THRESHOLD` | optional | Token threshold for nightly compact (default `50000`). Editable from the dashboard Settings page without restart |
 | `LOG_LEVEL` | optional | Application logger level (default `INFO`). Set `WARNING` to suppress chatty INFO output for privacy-sensitive deployments |
+| `HEARTBEAT_INTERVAL` | optional | Heartbeat scheduler interval in seconds (default `3600` = 60 min). Set `0` to disable |
 | `SERPER_API_KEY` | optional | Enables MCP web search |
 | `JINA_API_KEY` | optional | Enables MCP page reading |
 | `GEMINI_API_KEY` | optional | Enables image vision (Gemini Flash) |

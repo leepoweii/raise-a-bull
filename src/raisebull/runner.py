@@ -10,12 +10,15 @@ import os
 from asyncio.subprocess import DEVNULL, PIPE
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 from typing import Awaitable, Callable, Optional
 
 from raisebull.trace import TraceStep, parse_stream_event
 
 AsyncChunkCallback = Callable[[str], Awaitable[None]]
 AsyncTraceCallback = Callable[[TraceStep], Awaitable[None]]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -144,6 +147,7 @@ class ClaudeRunner:
         on_chunk: Optional[AsyncChunkCallback] = None,
         on_trace: Optional[AsyncTraceCallback] = None,
         timeout_seconds: float = 120.0,
+        source: str = "",
     ) -> RunResult:
         cmd = self._build_cmd(prompt, session_id)
 
@@ -217,6 +221,13 @@ class ClaudeRunner:
         stderr_output = await stderr_task
 
         result = self._parse_lines(raw_lines)
+        logger.info(
+            "LLM call: source=%s input=%d output=%d total=%d",
+            source,
+            result.input_tokens,
+            result.output_tokens,
+            (result.input_tokens or 0) + (result.output_tokens or 0),
+        )
         if proc.returncode != 0 and not result.error:
             result.error = stderr_output.decode(errors="replace").strip() or f"exit {proc.returncode}"
             result.text = ""

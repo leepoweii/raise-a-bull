@@ -191,7 +191,8 @@ The hook also auto-runs the LLM-free Playwright e2e subset (~5-15s) — it spawn
 - **Message buffer** — Discord/LINE accumulate messages in SQLite during silent mode; on @mention (Discord) or prefix trigger (LINE), buffer is injected as three-segment prompt (datetime + earlier + recent + mention), then hard-deleted after reply
 - **Per-channel lock** — `asyncio.Lock` per channel serializes LLM calls, preventing race conditions
 - **Session history** — Dashboard reads Claude Code `.jsonl` files to display full conversation history
-- **Heartbeat fresh start** — Each tick uses `session_id=None` to prevent token accumulation
+- **Heartbeat fresh start** — Each tick uses `session_id=None` to prevent token accumulation. Default interval changed from 5 min (300s) to 60 min (3600s) via `HEARTBEAT_INTERVAL` env default
+- **Per-call token logging** — `ClaudeRunner.run()` accepts an optional `source: str` parameter and logs `LLM call: source=... input=N output=N total=N` at INFO level after every LLM call. Call sites can pass a session key or domain name for cost attribution. Logger: `raisebull.runner`
 - **Nightly compact** — Scheduled job compacts sessions over the configured token threshold (default 50000) with new activity since the last compact, then runs a single consolidate prompt to update memory files. Skips `heartbeat:*` sessions
 - **Nightly compact threshold runtime-configurable** — `nightly_compact_threshold` in `settings.json` (highest priority) or `NIGHTLY_COMPACT_THRESHOLD` env (middle) or hardcoded 50000 default. Each cron tick + each manual trigger re-reads via `_read_threshold()` so dashboard edits take effect without restart. Invalid (zero/negative/non-numeric) values are rejected at PUT-time by the dashboard with HTTP 400, eliminating dashboard ↔ runtime divergence
 - **Nightly compact serialized** — Module-level `asyncio.Lock` (`_nightly_lock` in `heartbeat.py`) prevents cron + manual trigger from running `nightly_compact()` concurrently. APScheduler `max_instances=1` only protects the same job_id, not the manual `asyncio.create_task()` path from `/internal/nightly-compact/trigger`
@@ -216,6 +217,7 @@ The hook also auto-runs the LLM-free Playwright e2e subset (~5-15s) — it spawn
 | `CLAUDE_MODEL` | optional | Default: `claude-sonnet-4-6` |
 | `NIGHTLY_COMPACT_THRESHOLD` | optional | Token threshold for nightly compact (default `50000`). Overridden by `nightly_compact_threshold` in `settings.json` if present |
 | `LOG_LEVEL` | optional | Application logger level (default `INFO`). Set `WARNING` or `ERROR` to suppress chatty INFO output. Affects the `raisebull.*` logger family — does not change uvicorn's own loggers |
+| `HEARTBEAT_INTERVAL` | optional | Heartbeat interval in seconds (default `3600` = 60 min). Set `0` to disable. Changed from 300 (5 min) to 3600 (60 min) in 2026-04 |
 | `SERPER_API_KEY` | optional | Enables MCP search (free: serper.dev/signup) |
 | `JINA_API_KEY` | optional | Enables MCP browse (free: jina.ai) |
 | `GEMINI_API_KEY` | optional | Enables image vision (free: aistudio.google.com/apikey) |

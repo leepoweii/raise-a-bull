@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
-HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "300"))
+HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "3600"))
 MAX_DAILY_TRIGGERS = int(os.environ.get("MAX_DAILY_HEARTBEAT_TRIGGERS", "20"))
 COMPACT_TOKEN_THRESHOLD = 50_000
 
