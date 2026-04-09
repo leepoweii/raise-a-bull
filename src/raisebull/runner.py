@@ -140,6 +140,14 @@ class ClaudeRunner:
     # Async run
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _token_count(value: object) -> int:
+        """Normalize missing token counts to 0 for logging and aggregation."""
+        try:
+            return int(value or 0)
+        except (TypeError, ValueError):
+            return 0
+
     async def run(
         self,
         prompt: str,
@@ -221,12 +229,14 @@ class ClaudeRunner:
         stderr_output = await stderr_task
 
         result = self._parse_lines(raw_lines)
+        input_tokens = self._token_count(result.input_tokens)
+        output_tokens = self._token_count(result.output_tokens)
         logger.info(
             "LLM call: source=%s input=%d output=%d total=%d",
             source,
-            result.input_tokens,
-            result.output_tokens,
-            (result.input_tokens or 0) + (result.output_tokens or 0),
+            input_tokens,
+            output_tokens,
+            input_tokens + output_tokens,
         )
         if proc.returncode != 0 and not result.error:
             result.error = stderr_output.decode(errors="replace").strip() or f"exit {proc.returncode}"

@@ -25,7 +25,20 @@ logger = logging.getLogger(__name__)
 
 _scheduler: Optional[AsyncIOScheduler] = None
 
-HEARTBEAT_INTERVAL = int(os.environ.get("HEARTBEAT_INTERVAL", "3600"))
+
+def _read_int_env(name: str, default: int) -> int:
+    """Return an int env var or fall back to default when missing/malformed."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("%s=%r is invalid; falling back to %d", name, raw, default)
+        return default
+
+
+HEARTBEAT_INTERVAL = _read_int_env("HEARTBEAT_INTERVAL", 3600)
 MAX_DAILY_TRIGGERS = int(os.environ.get("MAX_DAILY_HEARTBEAT_TRIGGERS", "20"))
 COMPACT_TOKEN_THRESHOLD = 50_000
 

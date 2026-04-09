@@ -35,7 +35,7 @@ Each bot instance is a **workspace** — a directory with an identity, memory, a
 - **MCP Search** — Web search (Google SERP via Serper) + full page reading (Jina Reader), auto-configured when API keys are set
 - **Heartbeat** — Scheduled tasks via APScheduler + user-editable `heartbeat.md` (default 60 min interval)
 - **Memory** — SQLite session store + per-member memory files + daily digests
-- **Token logging** — Per-call LLM token usage logged at INFO level (`LLM call: source=... input=N output=N total=N`) for cost tracking and observability
+- **Token logging** — Per-call LLM token usage logged at INFO level (`LLM call: source=... input=N output=N total=N`) for cost tracking and observability; `source` is optional and stays blank unless a caller supplies it
 - **Skills** — 11 prebuilt skills (calendar, document draft, weather, image generation, IG design, etc.) + extensible with custom skills
 - **Identity** — Layered identity system (managed templates + local customization → compiled IDENTITY.md)
 
